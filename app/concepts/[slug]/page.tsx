@@ -9,16 +9,30 @@ export const dynamic = "force-dynamic";
 export default async function ConceptDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const snapshot = await getRadarSnapshot();
-  const signal = snapshot.signals.find((item) => item.slug === slug);
-  const concept = snapshot.concepts.find((item) => item.slug === slug);
+  const exactSignal = snapshot.signals.find((item) => item.slug === slug);
+  const conceptSlug = exactSignal?.conceptSlug ?? slug;
+  const concept = snapshot.concepts.find((item) => item.slug === conceptSlug);
+  const relatedSignals = snapshot.signals.filter((item) => (
+    item.conceptSlug === conceptSlug ||
+    item.slug === slug ||
+    item.slug === conceptSlug ||
+    item.slug.startsWith(`${conceptSlug}-`)
+  ));
+  const signal = exactSignal ?? relatedSignals[0];
   if (!signal && !concept) notFound();
+
   const title = concept?.name ?? signal?.title.split("：")[0] ?? "Concept";
   const definition = concept?.definition ?? signal?.summary ?? "";
-  const nodes = signal?.evidence ?? [
-    { label: "概念定义", kind: "origin" as const },
-    { label: "工程实践", kind: "implementation" as const },
-    { label: "交叉验证", kind: "independent" as const },
-  ];
+  const nodes = relatedSignals
+    .flatMap((item) => item.evidence)
+    .filter((node, index, values) => values.findIndex((candidate) => candidate.label === node.label && candidate.kind === node.kind) === index)
+    .slice(0, 5);
+  const signalRows = relatedSignals.map((item) => ({
+    item,
+    sources: item.sources
+      .filter((source, index, values) => values.findIndex((candidate) => candidate.href === source.href) === index),
+  }));
+  const evidenceHeat = concept?.temperature ?? Math.min(96, 30 + relatedSignals.reduce((total, item) => total + item.evidenceCount, 0) * 8);
 
   return (
     <AppShell active="concepts" status={snapshot.status}>
@@ -26,38 +40,37 @@ export default async function ConceptDetailPage({ params }: { params: Promise<{ 
         <nav className="breadcrumb" aria-label="面包屑"><Link href="/concepts">Concepts</Link><span>/</span><span>{title}</span></nav>
         <header className="concept-title">
           <div><span className="mono-label">CONCEPT BRIEF / REVISION 01</span><h1>{title}</h1><p>{definition}</p></div>
-          <div className="maturity-dial"><span>MATURITY</span><strong>{concept?.temperature ?? 74}</strong><small>{concept?.stage ?? signal?.stage}</small></div>
+          <div className="maturity-dial"><span>EVIDENCE HEAT</span><strong>{evidenceHeat}</strong><small>{concept?.stage ?? signal?.stage ?? "待采集"}</small></div>
         </header>
 
         <section className="detail-section evidence-timeline">
           <div className="detail-label"><span>01</span><b>证据脉冲</b><small>起源不是最早抓取</small></div>
-          <div><EvidencePulse nodes={nodes} />
-            <div className="timeline-labels">{nodes.map((node, index) => <span key={node.label}><b>0{index + 1}</b>{node.label}</span>)}</div>
-          </div>
+          {nodes.length ? <div><EvidencePulse nodes={nodes} />
+            <div className="timeline-labels">{nodes.map((node, index) => <span key={`${node.kind}-${node.label}`}><b>{String(index + 1).padStart(2, "0")}</b>{node.label}</span>)}</div>
+          </div> : <p className="muted-note">当前只有概念目录定义，尚未形成可引用的证据脉冲。</p>}
         </section>
 
-        <section className="detail-section novelty-section">
-          <div className="detail-label"><span>02</span><b>新颖性拆解</b><small>标签与机制分开</small></div>
-          <div className="novelty-grid">
-            <div><span>LABEL NOVELTY</span><strong>高</strong><p>词汇与叙事方式处于升温阶段。</p></div>
-            <div><span>MECHANISM NOVELTY</span><strong>中</strong><p>执行图、状态机和恢复机制已有先例，组合方式正在变化。</p></div>
-            <div><span>ADOPTION NOVELTY</span><strong>中高</strong><p>产品与框架开始把它作为显式工作面。</p></div>
+        <section className="detail-section related-signal-section">
+          <div className="detail-label"><span>02</span><b>相关中文信号</b><small>由采集文章聚类生成</small></div>
+          <div className="related-signal-list">
+            {signalRows.map(({ item, sources }) => <article key={item.slug}>
+              <header><span className="stage">{item.stage}</span><small>{item.recency} · {item.analysisMode === "deepseek" ? "DeepSeek 分析" : item.analysisMode === "openai" ? "OpenAI 分析" : item.analysisMode === "rules" ? "规则分析" : "编辑分析"}</small></header>
+              <h2>{item.title}</h2>
+              <p>{item.summary}</p>
+              <footer className="signal-source-map">
+                <b>本条来源</b>
+                {sources.map((source) => <a href={source.href} target="_blank" rel="noreferrer" key={source.href}>{source.name}<small>{new URL(source.href).hostname}</small><span aria-hidden="true">↗</span><i className="sr-only">（在新窗口打开）</i></a>)}
+              </footer>
+            </article>)}
+            {!relatedSignals.length && <p className="muted-note">尚无与此概念绑定的采集文章。</p>}
           </div>
         </section>
 
         <section className="detail-section engineering-section">
           <div className="detail-label"><span>03</span><b>工程含义</b><small>从热词到动作</small></div>
-          <div>
-            <h2>{signal?.implication ?? "把概念写入系统边界、验证动作和运行证据。"}</h2>
-            <div className="do-grid"><div><span>适合</span><p>长任务、多阶段状态、并行执行、需要人工审批或失败恢复的流程。</p></div><div><span>不适合</span><p>一次工具调用即可完成、没有持久状态、故障成本很低的简单任务。</p></div></div>
-          </div>
-        </section>
-
-        <section className="detail-section source-section">
-          <div className="detail-label"><span>04</span><b>来源</b><small>事实与推断分层</small></div>
-          <div className="source-citations">
-            {(signal?.sources ?? []).map((source, index) => <a href={source.href} target="_blank" rel="noreferrer" key={source.href}><span>0{index + 1}</span><b>{source.name}</b><small>{new URL(source.href).hostname}</small><i aria-hidden="true">↗</i></a>)}
-            {!signal && <p className="muted-note">此概念页目前只有定义回放，等待加入绑定证据。</p>}
+          <div className="engineering-read-list">
+            {relatedSignals.map((item, index) => <article key={item.slug}><span>{String(index + 1).padStart(2, "0")} / ENGINEERING READ</span><h2>{item.implication}</h2><small>对应信号：{item.title}</small></article>)}
+            {!relatedSignals.length && <p className="muted-note">没有来源支撑时不生成通用“适合 / 不适合”判断。</p>}
           </div>
         </section>
       </div>

@@ -27,7 +27,7 @@ export function SignalCard({ signal, featured = false }: { signal: Signal; featu
             <a href={source.href} target="_blank" rel="noreferrer" key={source.href}>{source.name}<span aria-hidden="true"> ↗</span></a>
           ))}
         </div>
-        <Link href={`/concepts/${signal.slug}`} className="detail-link">打开分析 <span aria-hidden="true">→</span></Link>
+        <Link href={`/concepts/${signal.conceptSlug ?? signal.slug}`} className="detail-link">打开分析 <span aria-hidden="true">→</span></Link>
       </footer>
     </article>
   );

@@ -407,12 +407,12 @@ export function chooseSignalSlug(item, analysis, candidates) {
   const incomingVersion = versionOf(item.title);
   let best = null;
   for (const candidate of candidates) {
+    if (candidate.concept_slug !== analysis.conceptSlug) continue;
     const candidateVersion = versionOf(candidate.original_title);
     if (incomingVersion && candidateVersion && candidate.independent_group === item.independentGroup) {
       if (incomingVersion === candidateVersion) return candidate.signal_slug;
       continue;
     }
-    if (candidate.concept_slug !== analysis.conceptSlug) continue;
     const titleScore = jaccard(incomingTokens, titleTokens(candidate.original_title));
     const tagScore = jaccard(incomingTags, new Set(JSON.parse(candidate.tags_json || "[]")));
     const score = titleScore * 0.8 + tagScore * 0.2;

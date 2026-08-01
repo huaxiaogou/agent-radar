@@ -176,3 +176,38 @@
 - Edge cases found: 4; default TLS fallback, independent Agent upstream failure, post-reload identity drift, and graceful-reload propagation delay are guarded.
 - Questions awaiting review: 0.
 - Next session should read this recovery session and `scripts/configure-nginx.sh` before changing virtual-host behavior.
+
+## Model atlas and concept evidence session
+
+### Deviations
+
+- The requested programming and everyday capability dimensions are represented as Radar editorial bands from 1–5, not as invented benchmark scores. Official model names, context windows and API prices remain visually and semantically separate from these judgments.
+- Model metadata is curated and timestamped rather than mutated by the four-hour article ingestion timer. Provider pages, regional prices and promotions need a verified publishing step; revisit with a stale-data alert before considering automated updates.
+- Source-registry expansion, generated Chinese article pages and image generation were audited but not added to this release. They require separate source adapters, provenance rules and publishing controls rather than an unreviewed broad crawl.
+
+### Discovered edge cases
+
+- A provider price changed during implementation; the current official page was re-opened, the value corrected, and every table row now links to its vendor evidence.
+- A temporary Claude Sonnet price has an explicit end date and preserves the standard price in the same record so the promotion cannot be mistaken for a permanent rate.
+- DeepSeek input prices depend on cache status; the page states that it uses the cache-miss basis and does not publish a future peak multiplier before it is effective.
+- Snapshot serialization previously removed `conceptSlug`, while signal URLs contain an event hash. Concept detail pages therefore could not recover their signals or original article links. The snapshot now retains the field, and the reader also supports old snapshots through a slug-prefix fallback.
+- One concept can contain several signals pointing to the same article. Concept pages deduplicate a URL within each signal but keep it clickable under every signal it supports, preserving claim-to-source mapping.
+- The exact comparison table is wider than a phone viewport. It has a keyboard-focusable horizontal scroll region, while the capability map itself stays within the mobile viewport.
+- Version-number clustering previously ran before the concept boundary check. Two releases such as `1.0.0` from one vendor group could therefore merge across concepts; concept equality is now a precondition for every reuse path.
+- A historical DeepSeek snapshot does not prove that the current server still has a DeepSeek key. The active-model label now follows the same provider, key and disable-switch precedence as ingestion instead of inferring from historical articles.
+- A signal with more than eight source articles previously retained the oldest eight. The snapshot now keeps the newest eight, and a nine-article regression test protects the window.
+- Several model markers can share one capability cell. The chart shows at most two named markers plus an aggregate marker after density exceeds three; the exact table always preserves every model.
+
+### Questions for review
+
+- Expand the official source registry in staged groups and use community channels only for discovery; a candidate should not publish until a primary source confirms it.
+- Add an unknown-concept candidate queue before allowing the analyzer to extend the fixed taxonomy automatically.
+- Prefer source-backed Chinese editorial synthesis—fact, Radar reading, engineering action and uncertainty—with the original link. Full article translation and generated images need explicit rights and provenance policies.
+
+### Session summary
+
+- Deviations count: 3.
+- Most likely revisit: add an automated freshness detector that flags model records for human verification without auto-publishing changed prices.
+- Edge cases found: 10; live price drift, promotions, cache-sensitive pricing, lost concept identity, duplicate sources, mobile overflow, cross-concept version clustering, stale active-provider inference, source-window ordering and marker density are handled.
+- Questions awaiting review: 3; staged source expansion, taxonomy candidates and the Chinese editorial publishing contract.
+- Next session should read this session, `app/lib/model-data.ts`, and the evidence boundaries on `/models` before changing comparisons or automation.

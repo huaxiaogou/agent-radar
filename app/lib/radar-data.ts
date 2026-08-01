@@ -5,6 +5,7 @@ export type EvidenceNode = {
 
 export type Signal = {
   slug: string;
+  conceptSlug?: string;
   eyebrow: string;
   title: string;
   summary: string;
@@ -84,6 +85,7 @@ export type RadarSnapshot = {
 export const signals: Signal[] = [
   {
     slug: "graph-engineering",
+    conceptSlug: "graph-engineering",
     eyebrow: "概念雷达 · Origin tracer running",
     title: "Graph Engineering：把 Agent 工作流变成可审计的执行结构",
     summary:
@@ -117,6 +119,7 @@ export const signals: Signal[] = [
   },
   {
     slug: "agent-manager",
+    conceptSlug: "agent-manager",
     eyebrow: "产品范式 · 多 Agent 管理",
     title: "Agent Manager 正从 IDE 的辅助面板变成独立工作界面",
     summary:
@@ -150,6 +153,7 @@ export const signals: Signal[] = [
   },
   {
     slug: "agent-framework-declarative",
+    conceptSlug: "multi-agent-orchestration",
     eyebrow: "工程变化 · 2026-07-23",
     title: "Microsoft 将多 Agent 编排从代码调用图移入可版本化工作流",
     summary:
@@ -177,6 +181,7 @@ export const signals: Signal[] = [
   },
   {
     slug: "autogen-maintenance",
+    conceptSlug: "multi-agent-orchestration",
     eyebrow: "项目状态 · Migration",
     title: "AutoGen 进入维护模式，新增项目转向 Microsoft Agent Framework",
     summary:
@@ -204,6 +209,7 @@ export const signals: Signal[] = [
   },
   {
     slug: "managed-agent-harness",
+    conceptSlug: "agent-harness",
     eyebrow: "Agent Harness · 工程证据",
     title: "Agent Harness 成为产品能力：循环、上下文、审批和遥测开始打包",
     summary:

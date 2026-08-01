@@ -6,6 +6,7 @@ const navItems = [
   ["today", "/today", "TODAY", "今日"],
   ["signals", "/signals", "SIG", "信号"],
   ["concepts", "/concepts", "CON", "概念"],
+  ["models", "/models", "MOD", "模型"],
   ["graph", "/graph", "MAP", "关系"],
   ["playbooks", "/playbooks", "PLAY", "方法"],
   ["sources", "/sources", "SRC", "来源"],

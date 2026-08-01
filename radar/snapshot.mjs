@@ -95,7 +95,7 @@ function groupSignals(rows) {
       confidence,
       accent: representative.accent,
       evidence,
-      sources: sources.slice(0, 8),
+      sources: sources.slice(-8).reverse(),
       publishedAt: newestAt,
       discoveredAt: representative.discovered_at,
       analysisMode: representative.analysis_mode,
@@ -193,7 +193,6 @@ export async function buildSnapshot(database) {
   const lastSuccessfulAt = successfulRun?.finished_at || null;
   const publicSignals = signals.map((signal) => {
     const publicSignal = { ...signal };
-    delete publicSignal.conceptSlug;
     delete publicSignal.relevanceScore;
     return publicSignal;
   });
