@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AppShell } from "../components/AppShell";
-import { relations } from "../lib/radar-data";
+import { getRadarSnapshot } from "../lib/radar-store";
 
 const graphNodes = [
   ["Agent Manager", "node-manager"],
@@ -11,9 +11,12 @@ const graphNodes = [
   ["Context\nEngineering", "node-context"],
 ] as const;
 
-export default function GraphPage() {
+export const dynamic = "force-dynamic";
+
+export default async function GraphPage() {
+  const snapshot = await getRadarSnapshot();
   return (
-    <AppShell active="graph">
+    <AppShell active="graph" status={snapshot.status}>
       <header className="page-hero compact-hero">
         <div><span className="mono-label">RELATIONSHIP MAP / 6 NODES · 5 EDGES</span><h1>Concept Graph</h1><p>关系是可引用的主张。图用于探索，下面的列表用于精确阅读和无障碍访问。</p></div>
         <Link href="/concepts" className="outline-action">概念索引 <span aria-hidden="true">→</span></Link>
@@ -28,7 +31,7 @@ export default function GraphPage() {
       </section>
       <section className="relation-list">
         <div className="section-heading"><div><span className="mono-label">ACCESSIBLE RELATION LIST</span><h2>关系证据</h2></div></div>
-        {relations.map((relation, index) => <div className="relation-row" key={`${relation.from}-${relation.to}`}><span>0{index + 1}</span><b>{relation.from}</b><i>{relation.type}</i><strong>{relation.to}</strong><small>{relation.note}</small></div>)}
+        {snapshot.relations.map((relation, index) => <div className="relation-row" key={`${relation.from}-${relation.to}`}><span>0{index + 1}</span><b>{relation.from}</b><i>{relation.type}</i><strong>{relation.to}</strong><small>{relation.note}</small></div>)}
       </section>
     </AppShell>
   );

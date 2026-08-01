@@ -1,0 +1,90 @@
+[
+  {
+    "slug": "agent-manager",
+    "name": "Agent Manager",
+    "definition": "以委派、并行观察、反馈与验收为中心的 Agent-first 工作界面和管理心法。",
+    "stage": "Validated",
+    "baseTemperature": 72,
+    "relation": "产品化 Multi-agent orchestration"
+  },
+  {
+    "slug": "graph-engineering",
+    "name": "Graph Engineering",
+    "definition": "围绕 Agent 执行图的状态、分支、恢复、可观测性与人机协作进行工程化设计。",
+    "stage": "Emerging",
+    "baseTemperature": 74,
+    "relation": "建立在 Durable execution 与 Orchestration 之上"
+  },
+  {
+    "slug": "agent-harness",
+    "name": "Agent Harness",
+    "definition": "包裹模型的工具循环、上下文、权限、记忆、审批和遥测运行层。",
+    "stage": "Validated",
+    "baseTemperature": 70,
+    "relation": "承载 Coding agent 与 Managed agent"
+  },
+  {
+    "slug": "context-engineering",
+    "name": "Context Engineering",
+    "definition": "系统性组织 Agent 在每一步可见的指令、状态、工具结果和外部知识。",
+    "stage": "Validated",
+    "baseTemperature": 68,
+    "relation": "Agent Harness 的核心设计面"
+  },
+  {
+    "slug": "durable-execution",
+    "name": "Durable Execution",
+    "definition": "让长任务能够检查点恢复、暂停、重试，并跨进程保存明确运行状态。",
+    "stage": "Validated",
+    "baseTemperature": 64,
+    "relation": "支撑 Graph Engineering"
+  },
+  {
+    "slug": "multi-agent-orchestration",
+    "name": "Multi-agent Orchestration",
+    "definition": "为多个专门 Agent 定义边界、协调模式、共享状态、验收与冲突处理。",
+    "stage": "Validated",
+    "baseTemperature": 66,
+    "relation": "被 Agent Manager 操作，被执行图约束"
+  },
+  {
+    "slug": "coding-agent",
+    "name": "Coding Agent",
+    "definition": "能够读取工程上下文、修改代码、调用工具并通过验证闭环交付任务的开发 Agent。",
+    "stage": "Validated",
+    "baseTemperature": 72,
+    "relation": "由 Harness 承载，在 Agent Manager 中被委派"
+  },
+  {
+    "slug": "agent-skills",
+    "name": "Agent Skills",
+    "definition": "可发现、按需加载并可版本化的 Agent 专业能力包，包含指令、资料和脚本。",
+    "stage": "Emerging",
+    "baseTemperature": 62,
+    "relation": "扩展 Agent Harness 的领域能力"
+  },
+  {
+    "slug": "mcp",
+    "name": "Model Context Protocol",
+    "definition": "连接 Agent 与工具、数据和外部能力的开放协议及其安全边界。",
+    "stage": "Validated",
+    "baseTemperature": 65,
+    "relation": "为 Harness 提供标准化工具连接"
+  },
+  {
+    "slug": "agent-security",
+    "name": "Agent Security",
+    "definition": "围绕提示注入、工具权限、沙箱、数据流与人工审批建立 Agent 纵深防御。",
+    "stage": "Emerging",
+    "baseTemperature": 60,
+    "relation": "约束 Harness、MCP 与 Coding Agent"
+  },
+  {
+    "slug": "evals-observability",
+    "name": "Agent Evals & Observability",
+    "definition": "用可重复评测、运行 trace、遥测与验证关口判断 Agent 是否真实完成任务。",
+    "stage": "Emerging",
+    "baseTemperature": 58,
+    "relation": "为 Agent 工作流提供验收证据"
+  }
+]

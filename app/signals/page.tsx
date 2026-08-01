@@ -1,40 +1,10 @@
-"use client";
+import { SignalsView } from "./SignalsView";
+import { getRadarSnapshot } from "../lib/radar-store";
 
-import { useMemo } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { signals } from "../lib/radar-data";
-import { AppShell } from "../components/AppShell";
-import { SignalCard } from "../components/SignalCard";
+export const dynamic = "force-dynamic";
 
-export default function SignalsPage() {
-  const stages = ["全部阶段", "Spark", "Emerging", "Validated", "Cooling"];
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const requestedStage = searchParams.get("stage");
-  const stage = stages.includes(requestedStage ?? "") ? requestedStage! : "全部阶段";
-  const visible = useMemo(() => signals.filter((signal) => stage === "全部阶段" || signal.stage === stage), [stage]);
-
-  function selectStage(nextStage: string) {
-    const nextParams = new URLSearchParams(searchParams.toString());
-    if (nextStage === "全部阶段") nextParams.delete("stage");
-    else nextParams.set("stage", nextStage);
-    const query = nextParams.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-  }
-
-  return (
-    <AppShell active="signals">
-      <header className="page-hero compact-hero">
-        <div><span className="mono-label">EVENT CLUSTERS / EVIDENCE FIRST</span><h1>Signals</h1><p>同一事件只占一个位置；传播数量和独立证据分开计算。</p></div>
-        <div className="hero-count"><strong>{visible.length}</strong><span>当前事件簇</span></div>
-      </header>
-      <section className="filter-bar page-filter" aria-label="趋势阶段筛选">
-        <div className="filter-group">
-          {stages.map((item) => <button type="button" aria-pressed={stage === item} onClick={() => selectStage(item)} key={item}>{stage === item && <span aria-hidden="true">✓</span>}{item}</button>)}
-        </div>
-      </section>
-      <div className="signal-stream wide-stream">{visible.map((signal) => <SignalCard signal={signal} key={signal.slug} />)}</div>
-    </AppShell>
-  );
+export default async function SignalsPage({ searchParams }: { searchParams: Promise<{ stage?: string | string[] }> }) {
+  const { stage } = await searchParams;
+  const snapshot = await getRadarSnapshot();
+  return <SignalsView initialStage={typeof stage === "string" ? stage : undefined} signals={snapshot.signals} status={snapshot.status} />;
 }

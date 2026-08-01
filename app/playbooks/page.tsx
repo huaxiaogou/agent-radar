@@ -1,14 +1,17 @@
 import { AppShell } from "../components/AppShell";
-import { playbooks } from "../lib/radar-data";
+import { getRadarSnapshot } from "../lib/radar-store";
 
-export default function PlaybooksPage() {
+export const dynamic = "force-dynamic";
+
+export default async function PlaybooksPage() {
+  const snapshot = await getRadarSnapshot();
   return (
-    <AppShell active="playbooks">
+    <AppShell active="playbooks" status={snapshot.status}>
       <header className="page-hero">
         <div><span className="mono-label">FROM SIGNAL TO PRACTICE</span><h1>Playbooks</h1><p>只有能转成决策、边界和验证动作的概念，才会进入工程方法库。</p></div>
       </header>
       <section className="playbook-list">
-        {playbooks.map((item, index) => (
+        {snapshot.playbooks.map((item, index) => (
           <article className="playbook-card" key={item.title}>
             <div className="playbook-index"><span>PB</span><strong>0{index + 1}</strong></div>
             <div><span className="mono-label">{item.maturity} · {item.steps} STEPS</span><h2>{item.title}</h2><p>{item.description}</p></div>

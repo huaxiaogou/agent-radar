@@ -1,5 +1,10 @@
 import { TodayView } from "./components/TodayView";
+import { getRadarSnapshot } from "./lib/radar-store";
 
-export default function Home() {
-  return <TodayView />;
+export const dynamic = "force-dynamic";
+
+export default async function Home({ searchParams }: { searchParams: Promise<{ topic?: string | string[] }> }) {
+  const { topic } = await searchParams;
+  const snapshot = await getRadarSnapshot();
+  return <TodayView initialTopic={typeof topic === "string" ? topic : undefined} snapshot={snapshot} />;
 }

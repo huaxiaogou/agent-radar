@@ -2,16 +2,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../components/AppShell";
 import { EvidencePulse } from "../../components/EvidencePulse";
-import { concepts, signals } from "../../lib/radar-data";
+import { getRadarSnapshot } from "../../lib/radar-store";
 
-export function generateStaticParams() {
-  return [...new Set([...signals.map((signal) => signal.slug), ...concepts.map((concept) => concept.slug)])].map((slug) => ({ slug }));
-}
+export const dynamic = "force-dynamic";
 
 export default async function ConceptDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const signal = signals.find((item) => item.slug === slug);
-  const concept = concepts.find((item) => item.slug === slug);
+  const snapshot = await getRadarSnapshot();
+  const signal = snapshot.signals.find((item) => item.slug === slug);
+  const concept = snapshot.concepts.find((item) => item.slug === slug);
   if (!signal && !concept) notFound();
   const title = concept?.name ?? signal?.title.split("：")[0] ?? "Concept";
   const definition = concept?.definition ?? signal?.summary ?? "";
@@ -22,7 +21,7 @@ export default async function ConceptDetailPage({ params }: { params: Promise<{ 
   ];
 
   return (
-    <AppShell active="concepts">
+    <AppShell active="concepts" status={snapshot.status}>
       <div className="concept-detail">
         <nav className="breadcrumb" aria-label="面包屑"><Link href="/concepts">Concepts</Link><span>/</span><span>{title}</span></nav>
         <header className="concept-title">

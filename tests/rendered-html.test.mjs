@@ -1,18 +1,65 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
-import test from "node:test";
+import { createServer } from "node:net";
+import { after, before, test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const projectRoot = new URL("../", import.meta.url);
+const projectPath = fileURLToPath(projectRoot);
+const nextBin = fileURLToPath(new URL("../node_modules/next/dist/bin/next", import.meta.url));
+let serverProcess;
+let baseUrl;
+let serverOutput = "";
+
+async function reservePort() {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close((error) => (error ? reject(error) : resolve(port)));
+    });
+  });
+}
+
+before(async () => {
+  const port = await reservePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  serverProcess = spawn(process.execPath, [nextBin, "start", "--hostname", "127.0.0.1", "--port", String(port)], {
+    cwd: projectPath,
+    env: { ...process.env, NODE_ENV: "production" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  serverProcess.stdout.on("data", (chunk) => { serverOutput += chunk; });
+  serverProcess.stderr.on("data", (chunk) => { serverOutput += chunk; });
+
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    if (serverProcess.exitCode !== null) {
+      throw new Error(`Next.js exited before becoming ready:\n${serverOutput}`);
+    }
+    try {
+      const response = await fetch(`${baseUrl}/api/health`);
+      if (response.ok) return;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`Next.js did not become ready:\n${serverOutput}`);
+});
+
+after(async () => {
+  if (!serverProcess || serverProcess.exitCode !== null) return;
+  serverProcess.kill("SIGTERM");
+  await Promise.race([
+    new Promise((resolve) => serverProcess.once("exit", resolve)),
+    new Promise((resolve) => setTimeout(resolve, 5000)),
+  ]);
+  if (serverProcess.exitCode === null) serverProcess.kill("SIGKILL");
+});
 
 async function render(path = "/") {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}-${path}`);
-  const { default: worker } = await import(workerUrl.href);
-  return worker.fetch(
-    new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }),
-    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
-    { waitUntil() {}, passThroughOnException() {} },
-  );
+  return fetch(`${baseUrl}${path}`, { headers: { accept: "text/html" } });
 }
 
 test("server-renders the Agent Radar experience and social metadata", async () => {
@@ -23,11 +70,12 @@ test("server-renders the Agent Radar experience and social metadata", async () =
   const html = await response.text();
   assert.match(html, /<title>Agent Radar — AI Coding 技术情报<\/title>/i);
   assert.match(html, /今天，不追新闻/);
-  assert.match(html, /V1 真实来源回放/);
+  assert.match(html, /LIVE INGESTION/);
+  assert.doesNotMatch(html, /V1 真实来源回放|实时采集尚未启用/);
   assert.match(html, /href="\/today"/);
   assert.match(html, /href="\/concepts"/);
   assert.match(html, /name="theme-color" content="#f2f6f8"/);
-  assert.match(html, /property="og:image" content="http:\/\/localhost(?::3000)?\/og.png"/);
+  assert.match(html, /property="og:image" content="http:\/\/127\.0\.0\.1:\d+\/og.png"/);
   assert.doesNotMatch(html, /codex-preview|Building your site|react-loading-skeleton/i);
 });
 
@@ -53,4 +101,21 @@ test("starter preview is removed and project assets are present", async () => {
   await access(new URL("../public/og.png", import.meta.url));
   await access(new URL("../design-system/agent-radar/MASTER.md", import.meta.url));
   await access(projectRoot);
+});
+
+test("health endpoint identifies this service", async () => {
+  const response = await render("/api/health");
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { service: "agent-radar", status: "ok" });
+});
+
+test("public status endpoint exposes ingestion health without a login", async () => {
+  const response = await render("/api/status");
+  assert.equal(response.status, 200);
+  const status = await response.json();
+  assert.equal(status.service, "agent-radar");
+  assert.ok(["live", "seed"].includes(status.mode));
+  assert.equal(typeof status.sourceCount, "number");
+  assert.ok(Array.isArray(status.sources));
+  assert.match(response.headers.get("cache-control") ?? "", /no-store/);
 });

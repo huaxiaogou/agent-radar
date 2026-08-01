@@ -2,28 +2,42 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { concepts, signals } from "../lib/radar-data";
+import { usePathname, useRouter } from "next/navigation";
+import type { RadarSnapshot } from "../lib/radar-data";
 import { AppShell } from "./AppShell";
 import { SignalCard } from "./SignalCard";
 
 const filters = ["全部", "概念", "产品", "工程", "迁移"] as const;
 
-export function TodayView() {
+function observationParts(value: string) {
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(value));
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "--";
+  return { date: `${get("month")}·${get("day")}`, time: `${get("hour")}:${get("minute")} CST` };
+}
+
+export function TodayView({ initialTopic, snapshot }: { initialTopic?: string; snapshot: RadarSnapshot }) {
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const requestedFilter = searchParams.get("topic");
-  const filter = filters.find((item) => item === requestedFilter) ?? "全部";
+  const { concepts, signals, status } = snapshot;
+  const filter = filters.find((item) => item === initialTopic) ?? "全部";
   const filtered = useMemo(
     () => signals.filter((signal) => filter === "全部" || signal.topic === filter),
-    [filter],
+    [filter, signals],
   );
   const lead = filtered[0];
   const rest = filtered.slice(1);
+  const observedAt = status.lastSuccessfulAt || status.generatedAt;
+  const observed = observationParts(observedAt);
 
   function selectFilter(nextFilter: (typeof filters)[number]) {
-    const nextParams = new URLSearchParams(searchParams.toString());
+    const nextParams = new URLSearchParams(window.location.search);
     if (nextFilter === "全部") nextParams.delete("topic");
     else nextParams.set("topic", nextFilter);
     const query = nextParams.toString();
@@ -31,18 +45,18 @@ export function TodayView() {
   }
 
   return (
-    <AppShell active="today">
+    <AppShell active="today" status={status}>
       <section className="radar-intro">
         <div className="intro-copy">
-          <p className="mono-label">RADAR WINDOW / CURATED REPLAY</p>
+          <p className="mono-label">RADAR WINDOW / LIVE INGESTION</p>
           <h1>今天，不追新闻。<br /><span>追踪工程范式的位移。</span></h1>
-          <p className="intro-deck">将热词还原为来源、机制、采用证据和工程边界。首版以真实来源回放验证信息架构，实时采集尚未启用。</p>
+          <p className="intro-deck">从官方工程博客、项目发布和一线实践者持续采集，将新变化还原为来源、机制、采用证据与工程边界。</p>
         </div>
-        <time className="observation-stamp" dateTime="2026-08-01T10:18:00+08:00" aria-label="来源最后核验于 2026 年 8 月 1 日 10 点 18 分，中国标准时间">
+        <time className="observation-stamp" dateTime={observedAt} aria-label={`来源最后成功采集于 ${observed.date} ${observed.time}`}>
           <span>LAST VERIFIED</span>
-          <strong>08·01</strong>
-          <b>10:18 CST</b>
-          <small>35 sources registered</small>
+          <strong>{observed.date}</strong>
+          <b>{observed.time}</b>
+          <small>{status.healthySourceCount}/{status.sourceCount} sources healthy</small>
         </time>
       </section>
 
@@ -54,7 +68,7 @@ export function TodayView() {
             </button>
           ))}
         </div>
-        <span className="result-count" aria-live="polite">{filtered.length} 条回放信号</span>
+        <span className="result-count" aria-live="polite">{filtered.length} 条有效信号</span>
       </section>
 
       {lead ? (
@@ -112,7 +126,7 @@ export function TodayView() {
       ) : (
         <section className="empty-state">
           <span className="mono-label">NO MATCH</span>
-          <h2>当前筛选没有回放信号</h2>
+          <h2>当前筛选没有有效信号</h2>
           <p>换一个主题，或前往 Signals 查看完整事件流。</p>
           <button type="button" onClick={() => selectFilter("全部")}>显示全部</button>
         </section>

@@ -18,8 +18,8 @@
   --sidebar-muted: #9bb0c3;
   --text-hero: clamp(2.55rem, 5vw, 4.8rem);
   --text-h1: clamp(2.25rem, 4vw, 4rem);
-  --font-ui: var(--font-geist-sans), "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --font-data: var(--font-geist-mono), "SFMono-Regular", Consolas, monospace;
+  --font-ui: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-data: "SFMono-Regular", "Cascadia Code", Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -141,6 +141,9 @@ p, a, b, strong, small { overflow-wrap: anywhere; }
 .sidebar-foot > span { vertical-align: middle; }
 .sidebar-foot small { display: block; margin-top: 8px; color: #708ba5; line-height: 1.5; }
 .status-light { display: inline-block; width: 8px; height: 8px; margin-right: 7px; background: #84d6e4; border-radius: 50%; box-shadow: 0 0 0 4px rgba(132, 214, 228, 0.1); }
+.status-light.is-live { background: var(--supported); box-shadow: 0 0 0 4px rgba(51, 160, 105, 0.12); }
+.status-light.is-partial { background: var(--signal); box-shadow: 0 0 0 4px rgba(255, 178, 44, 0.14); }
+.status-light.is-delayed { background: var(--conflict); box-shadow: 0 0 0 4px rgba(217, 96, 96, 0.12); }
 
 .workspace { min-width: 0; overflow-x: clip; }
 .topbar { display: flex; min-height: 72px; align-items: center; justify-content: space-between; padding: 10px clamp(22px, 4vw, 64px); background: rgba(242, 246, 248, 0.92); border-bottom: 1px solid var(--rule); backdrop-filter: blur(12px); }
@@ -149,6 +152,9 @@ p, a, b, strong, small { overflow-wrap: anywhere; }
 .topbar b { font-size: 0.95rem; }
 .topbar-actions { display: flex; align-items: center; gap: 12px; }
 .snapshot-badge { padding: 6px 10px; color: var(--evidence-dark); background: #e5eaff; border: 1px solid #c3ceff; border-radius: 999px; font-size: 0.75rem; font-weight: 650; }
+.snapshot-badge.is-live { color: #17603b; background: #e4f6ed; border-color: #b8dfca; }
+.snapshot-badge.is-partial { color: #76510e; background: #fff4d7; border-color: #ecd18b; }
+.snapshot-badge.is-delayed { color: #8a3030; background: #fff0f0; border-color: #ecc1c1; }
 .search-link { display: flex; min-height: 44px; align-items: center; gap: 7px; padding: 0 12px; color: var(--ink-muted); border-radius: 8px; font-size: 0.86rem; transition: background-color 180ms ease, color 180ms ease; }
 .search-link span { font-size: 1.25rem; }
 .search-link:hover { color: var(--ink); background: var(--surface-muted); }
@@ -356,6 +362,9 @@ main { width: min(100%, 1600px); margin: 0 auto; padding: 0 clamp(22px, 4vw, 64p
 .source-priority { color: var(--evidence-dark); font-weight: 700; }
 .source-status { display: flex; align-items: center; gap: 6px; }
 .source-status i { width: 7px; height: 7px; background: var(--supported); border-radius: 50%; }
+.source-status.status-异常 i { background: var(--conflict); }
+.source-status.status-延迟 i { background: var(--signal); }
+.source-status.status-待首次采集 i { background: var(--muted); }
 .source-method { margin-top: 18px; padding: 20px; color: #eaf2f6; background: var(--sidebar); border-radius: 12px; }
 .source-method .mono-label { color: #8fa5b7; }
 .source-method p { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 12px 0 0; font-size: .75rem; }

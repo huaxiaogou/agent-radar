@@ -18,6 +18,67 @@ export type Signal = {
   accent: "signal" | "evidence" | "engineering" | "conflict";
   evidence: EvidenceNode[];
   sources: Array<{ name: string; href: string }>;
+  publishedAt?: string;
+  discoveredAt?: string;
+  analysisMode?: "curated" | "rules" | "openai";
+};
+
+export type Concept = {
+  slug: string;
+  name: string;
+  definition: string;
+  stage: string;
+  temperature: number;
+  relation: string;
+  signalCount?: number;
+};
+
+export type RadarSource = {
+  id?: string;
+  name: string;
+  class: string;
+  priority: string;
+  cadence: string;
+  status: string;
+  focus: string;
+  href: string;
+  lastAttemptAt?: string | null;
+  lastSuccessAt?: string | null;
+  lastError?: string | null;
+  itemCount?: number;
+};
+
+export type RadarDigest = {
+  period: string;
+  title: string;
+  summary: string;
+  signals: number;
+  state: "自动生成" | "样本";
+};
+
+export type RadarStatus = {
+  mode: "live" | "seed";
+  generatedAt: string;
+  lastRunAt: string | null;
+  lastSuccessfulAt: string | null;
+  runStatus: "success" | "partial" | "failed" | "never";
+  analysisMode: "rules" | "openai" | "mixed" | "curated";
+  sourceCount: number;
+  healthySourceCount: number;
+  signalCount: number;
+  articleCount: number;
+  stale: boolean;
+};
+
+export type RadarSnapshot = {
+  version: 1;
+  status: RadarStatus;
+  signals: Signal[];
+  concepts: Concept[];
+  sources: RadarSource[];
+  relations: Array<{ from: string; type: string; to: string; note: string }>;
+  playbooks: Array<{ title: string; description: string; steps: number; maturity: string }>;
+  digests: RadarDigest[];
 };
 
 export const signals: Signal[] = [
@@ -249,3 +310,31 @@ export const playbooks = [
   { title: "执行图设计检查表", description: "为节点契约、状态归属、重试、人工审批和失败恢复建立最小约束。", steps: 9, maturity: "草案" },
   { title: "新概念溯源协议", description: "区分最早抓取、最早命名、机制先例和首次规模化采用。", steps: 7, maturity: "可执行" },
 ];
+
+export const digests: RadarDigest[] = [
+  { period: "2026 / W31", title: "从 Agent Manager 到独立 Agent 工作面", summary: "Google 将 Agent Manager 的核心范式从 IDE 拆出；管理多个异步 Agent 正成为独立产品问题。", signals: 3, state: "样本" },
+  { period: "2026 / W30", title: "声明式编排与 Harness 同时进入稳定层", summary: "Microsoft Agent Framework 连续发布 Harness 与声明式工作流，工程重心从 Agent 角色转向运行契约。", signals: 4, state: "样本" },
+];
+
+export const seedRadarSnapshot: RadarSnapshot = {
+  version: 1,
+  status: {
+    mode: "seed",
+    generatedAt: "2026-08-01T02:18:00.000Z",
+    lastRunAt: null,
+    lastSuccessfulAt: null,
+    runStatus: "never",
+    analysisMode: "curated",
+    sourceCount: sources.length,
+    healthySourceCount: sources.length,
+    signalCount: signals.length,
+    articleCount: signals.reduce((total, signal) => total + signal.evidenceCount, 0),
+    stale: true,
+  },
+  signals,
+  concepts,
+  sources,
+  relations,
+  playbooks,
+  digests,
+};
