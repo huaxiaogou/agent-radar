@@ -175,6 +175,13 @@ const ANALYSIS_EXAMPLE = {
   tags: ["agent-harness", "durable-execution"],
 };
 
+const ANALYSIS_ENUM_GUIDANCE = [
+  `topic 只能是：${TOPICS.join("、")}`,
+  `conceptSlug 只能是：${CONCEPT_RULES.map((rule) => rule.slug).join("、")}`,
+  `stage 只能是：${STAGES.join("、")}`,
+  `accent 只能是：${ACCENTS.join("、")}`,
+].join("\n");
+
 function analysisInput(item) {
   const sourceText = cleanText(item.contentText || item.excerpt || "", 7000);
   return `来源：${item.sourceName}\n类型：${item.sourceClass}\n标题：${item.title}\nURL：${item.url}\n发布日期：${item.publishedAt || "未知"}\n正文摘录：\n${sourceText}`;
@@ -190,24 +197,53 @@ function outputText(response) {
   return "";
 }
 
-function validateAnalysis(value, analysisMode) {
+function validateAnalysis(value, analysisMode, categoricalFallback) {
   if (!value || typeof value !== "object") throw new Error("分析结果不是对象");
-  for (const key of ["title", "summary", "implication", "topic", "conceptSlug", "stage", "accent"]) {
+  for (const key of ["title", "summary", "implication"]) {
     if (typeof value[key] !== "string" || !value[key].trim()) throw new Error(`分析结果缺少 ${key}`);
   }
-  if (!TOPICS.includes(value.topic) || !STAGES.includes(value.stage) || !ACCENTS.includes(value.accent)) {
-    throw new Error("分析结果枚举无效");
+  if (!categoricalFallback) {
+    for (const key of ["topic", "conceptSlug", "stage", "accent"]) {
+      if (typeof value[key] !== "string" || !value[key].trim()) throw new Error(`分析结果缺少 ${key}`);
+    }
   }
-  if (!CONCEPT_RULES.some((rule) => rule.slug === value.conceptSlug)) throw new Error("概念分类无效");
-  if (!Array.isArray(value.tags)) throw new Error("tags 不是数组");
-  return {
+
+  const repairs = [];
+  function categoricalValue(key, allowed, errorMessage) {
+    if (allowed.includes(value[key])) return value[key];
+    if (!categoricalFallback) throw new Error(errorMessage);
+    repairs.push(`${key}=${cleanText(value[key], 60) || "空"}`);
+    return categoricalFallback[key];
+  }
+
+  const topic = categoricalValue("topic", TOPICS, "分析结果枚举无效");
+  const conceptSlug = categoricalValue("conceptSlug", CONCEPT_RULES.map((rule) => rule.slug), "概念分类无效");
+  const stage = categoricalValue("stage", STAGES, "分析结果枚举无效");
+  const accent = categoricalValue("accent", ACCENTS, "分析结果枚举无效");
+  let tags;
+  if (Array.isArray(value.tags)) {
+    tags = value.tags.map((tag) => cleanText(tag, 40)).filter(Boolean).slice(0, 8);
+  } else if (categoricalFallback) {
+    repairs.push("tags=非数组");
+    tags = categoricalFallback.tags;
+  } else {
+    throw new Error("tags 不是数组");
+  }
+
+  const result = {
     ...value,
     title: cleanText(value.title, 140),
     summary: cleanText(value.summary, 420),
     implication: cleanText(value.implication, 300),
-    tags: value.tags.map((tag) => cleanText(tag, 40)).filter(Boolean).slice(0, 8),
+    topic,
+    conceptSlug,
+    stage,
+    accent,
+    tags,
     analysisMode,
   };
+  if (repairs.length) result.analysisWarning = `分类字段已按规则修复：${repairs.join("; ")}`;
+  return result;
 }
 
 export function resolveAnalysisProvider(environment = process.env) {
@@ -294,7 +330,7 @@ async function deepSeekAttempt(item) {
       messages: [
         {
           role: "system",
-          content: `${ANALYSIS_INSTRUCTIONS}\n必须仅输出一个 JSON 对象，不要使用 Markdown。JSON 字段和格式示例：\n${JSON.stringify(ANALYSIS_EXAMPLE)}`,
+          content: `${ANALYSIS_INSTRUCTIONS}\n必须仅输出一个 JSON 对象，不要使用 Markdown。\n${ANALYSIS_ENUM_GUIDANCE}\nJSON 字段和格式示例：\n${JSON.stringify(ANALYSIS_EXAMPLE)}`,
         },
         { role: "user", content: analysisInput(item) },
       ],
@@ -320,7 +356,7 @@ async function deepSeekAttempt(item) {
   } catch (error) {
     throw new Error(`DeepSeek JSON 无效：${error instanceof Error ? error.message : String(error)}`);
   }
-  return validateAnalysis(parsed, "deepseek");
+  return validateAnalysis(parsed, "deepseek", ruleAnalysis(item));
 }
 
 export async function deepSeekAnalysis(item) {

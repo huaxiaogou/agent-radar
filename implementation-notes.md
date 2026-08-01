@@ -1,5 +1,28 @@
 # Implementation notes
 
+## DeepSeek production enum repair session
+
+### Deviations
+
+- Production proved that stable JSON Output preserved JSON syntax but not the site's enum contract. Instead of moving the scheduled pipeline to DeepSeek's Beta strict-tool endpoint, valid model prose is retained while invalid categorical fields are repaired by the existing deterministic classifier.
+
+### Discovered edge cases
+
+- All 16 model-eligible articles can return usable prose with invalid `conceptSlug`, `topic`, `stage`, or `accent`; treating each categorical mismatch as a total AI failure makes the entire batch silently become rules analysis.
+- Category repair must remain visible without turning a successful model response into an ingestion error. Runs now report `AI repairs`, while missing core prose, malformed JSON, timeouts, and provider failures still count as fallbacks and can make the run partial.
+
+### Questions for review
+
+- None. The fix does not change credentials, source fetching, history, database schema, timer units, or the public write surface.
+
+### Session summary
+
+- Deviations count: 1.
+- Most likely revisit: move to DeepSeek strict tool calls only after its Beta endpoint is suitable for unattended scheduled production work.
+- Edge cases found: 2; batch-wide enum drift and the distinction between repairable categories and unusable model prose are handled.
+- Questions awaiting review: 0; historical rules articles intentionally remain unchanged.
+- Next session should read this session, the production log from 2026-08-01 16:03, and `validateAnalysis` before changing provider validation.
+
 ## AI provider session
 
 ### Deviations

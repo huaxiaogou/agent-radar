@@ -184,6 +184,8 @@ test("DeepSeek analysis uses JSON Output and records the real provider", async (
     assert.deepEqual(requestBody.response_format, { type: "json_object" });
     assert.deepEqual(requestBody.thinking, { type: "disabled" });
     assert.match(requestBody.messages[0].content, /JSON/);
+    assert.match(requestBody.messages[0].content, /conceptSlug 只能是/);
+    assert.match(requestBody.messages[0].content, /coding-agent/);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY;
@@ -192,6 +194,54 @@ test("DeepSeek analysis uses JSON Output and records the real provider", async (
     else process.env.RADAR_DEEPSEEK_MODEL = originalModel;
     if (originalBaseUrl === undefined) delete process.env.RADAR_DEEPSEEK_BASE_URL;
     else process.env.RADAR_DEEPSEEK_BASE_URL = originalBaseUrl;
+  }
+});
+
+test("DeepSeek keeps valid prose and repairs out-of-contract categorical fields", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.DEEPSEEK_API_KEY;
+  let attempts = 0;
+  process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+  globalThis.fetch = async () => {
+    attempts += 1;
+    return new Response(JSON.stringify({
+      choices: [{
+        finish_reason: "stop",
+        message: {
+          content: JSON.stringify({
+            title: "Agent Harness 发布新的恢复能力",
+            summary: "官方版本加入任务恢复能力，但大规模生产采用仍需要更多证据。",
+            implication: "团队应验证检查点恢复、幂等重试和运行时可观测性。",
+            topic: "技术趋势",
+            conceptSlug: "agent-runtime-management",
+            stage: "Mature",
+            accent: "runtime",
+            tags: ["agent-harness", "runtime"],
+          }),
+        },
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const result = await deepSeekAnalysis({
+      title: "Agent Harness release", excerpt: "Stable agent runtime with checkpoints, approvals and telemetry.", contentText: "",
+      sourceName: "Official Engineering", sourceClass: "一手工程", url: "https://example.com/harness", publishedAt: null,
+    });
+    assert.equal(attempts, 1);
+    assert.equal(result.analysisMode, "deepseek");
+    assert.equal(result.title, "Agent Harness 发布新的恢复能力");
+    assert.equal(result.conceptSlug, "agent-harness");
+    assert.equal(result.topic, "工程");
+    assert.equal(result.stage, "Validated");
+    assert.equal(result.accent, "engineering");
+    assert.match(result.analysisWarning, /conceptSlug/);
+    assert.match(result.analysisWarning, /topic/);
+    assert.match(result.analysisWarning, /stage/);
+    assert.match(result.analysisWarning, /accent/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = originalKey;
   }
 });
 

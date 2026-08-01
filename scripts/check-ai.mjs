@@ -38,6 +38,7 @@ try {
       ? process.env.RADAR_DEEPSEEK_MODEL || "deepseek-v4-flash"
       : process.env.RADAR_OPENAI_MODEL || "gpt-5.6-terra",
     analysisMode: result.analysisMode,
+    repairedCategories: Boolean(result.analysisWarning),
   }, null, 2));
 } catch (error) {
   console.error(`AI 供应商检查失败：${error instanceof Error ? error.message : String(error)}`);

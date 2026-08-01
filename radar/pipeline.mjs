@@ -126,6 +126,7 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
     const enriched = await mapLimit(selected, Number(process.env.RADAR_FETCH_CONCURRENCY || 4), enrichItem);
     const maxAIItems = Number(process.env.RADAR_MAX_AI_ITEMS || 16);
     let analysisFallbackCount = 0;
+    let analysisRepairCount = 0;
     const analyzed = await mapLimit(
       enriched,
       Number(process.env.RADAR_ANALYSIS_CONCURRENCY || 2),
@@ -134,6 +135,10 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
         if (result.analysisError) {
           analysisFallbackCount += 1;
           logger.error?.(`[analysis:${item.url}] ${result.analysisError}`);
+        }
+        if (result.analysisWarning) {
+          analysisRepairCount += 1;
+          logger.warn?.(`[analysis-repair:${item.url}] ${result.analysisWarning}`);
         }
         return { item, analysis: result };
       },
@@ -198,6 +203,7 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
     const message = [
       `${sources.length - failedSources}/${sources.length} sources succeeded`,
       `${acceptedCount} new articles`,
+      analysisRepairCount ? `${analysisRepairCount} AI repairs` : null,
       analysisFallbackCount ? `${analysisFallbackCount} AI fallbacks` : null,
     ].filter(Boolean).join("; ");
     const result = {
@@ -207,6 +213,7 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
       acceptedCount,
       skippedCount,
       errorCount: failedSources + analysisFallbackCount,
+      analysisRepairCount,
       analysisMode,
       message,
     };
