@@ -261,19 +261,39 @@ verify_https_identity() {
   local domain="$1"
   local path="$2"
   local identity="$3"
-  local response
+  local label="$4"
+  local response_file
+  local status="000"
+  local attempt
 
-  response="$(
-    curl --fail --silent --show-error --max-time 8 --noproxy "*" \
-      --resolve "${domain}:443:127.0.0.1" \
-      "https://${domain}${path}"
-  )" && grep -Fq "${identity}" <<<"${response}"
+  response_file="$(mktemp)"
+  for attempt in {1..10}; do
+    status="000"
+    status="$(
+      curl --fail --silent --max-time 8 --noproxy "*" \
+        --output "${response_file}" --write-out "%{http_code}" \
+        --resolve "${domain}:443:127.0.0.1" \
+        "https://${domain}${path}" || true
+    )"
+    if [[ "${status}" == "200" ]] && grep -Fq "${identity}" "${response_file}"; then
+      rm -f "${response_file}"
+      echo "HTTPS 身份验证通过：${label}（${domain}）"
+      return 0
+    fi
+    [[ "${attempt}" == "10" ]] || sleep 1
+  done
+
+  rm -f "${response_file}"
+  echo "错误：${label} HTTPS 身份验证失败：${domain}${path}，最后 HTTP 状态 ${status}。" >&2
+  return 1
 }
 
-if ! verify_https_identity "${DOMAIN}" "/api/health" '"service":"agent-radar"' ||
+if ! verify_https_identity "${DOMAIN}" "/api/health" '"service":"agent-radar"' \
+  "Agent Radar" ||
   ! verify_https_identity "agent.jayjp.com" "/api/health" \
-    '"service":"agent-engineering-coursebook"' ||
-  ! verify_https_identity "lona.jayjp.com" "/" "LoanRisk Coursebook"; then
+    '"service":"agent-engineering-coursebook"' "Agent 课程站" ||
+  ! verify_https_identity "lona.jayjp.com" "/" "LoanRisk Coursebook" \
+    "金融站"; then
   rollback_config
   echo "错误：HTTPS 身份回归失败，已恢复 Radar 修改；未修改 Agent 或金融站配置。" >&2
   exit 1

@@ -18,9 +18,14 @@ test("Nginx deployment configures HTTPS and protects sibling sites", async () =>
   assert.match(source, /"service":"agent-engineering-coursebook"/u);
   assert.match(source, /"service":"agent-radar"/u);
   assert.match(source, /rollback_config/u);
+  assert.match(source, /for attempt in \{1\.\.10\}/u);
+  assert.match(source, /最后 HTTP 状态/u);
   assert.match(
     source,
-    /verify_https_identity "agent\.jayjp\.com" "\/api\/health"/u,
+    /verify_https_identity "agent\.jayjp\.com" "\/api\/health"[\s\S]*"Agent 课程站"/u,
   );
-  assert.match(source, /verify_https_identity "lona\.jayjp\.com" "\/"/u);
+  assert.match(
+    source,
+    /verify_https_identity "lona\.jayjp\.com" "\/"[\s\S]*"金融站"/u,
+  );
 });

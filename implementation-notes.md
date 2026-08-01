@@ -92,6 +92,7 @@
 - An HTTPS request without an exact `radar.jayjp.com` TLS virtual host can be served by the existing default financial virtual host even when the HTTP proxy is correct. A live TLS probe confirmed the Radar root returned `LoanRisk Coursebook` and `/api/health` returned that app's 404.
 - An unrelated 3001 outage appears as an Agent-domain 502 and must be repaired at the Agent upstream; changing Radar routing must not hide it. The helper now refuses to modify Nginx unless all three local upstream identities pass.
 - Syntax-valid Nginx configuration is not enough. Reload and post-reload SNI identity checks can still fail, so the helper restores the prior Radar file when either stage fails.
+- Production showed a post-reload 404 without identifying which SNI check failed. HTTPS verification now labels every domain and retries for up to ten seconds so a graceful-reload handoff cannot cause an immediate false rollback.
 
 ### Questions for review
 
@@ -101,6 +102,6 @@
 
 - Deviations count: 1.
 - Most likely revisit: explicit certificate paths if the TLS terminator moves away from this Nginx instance.
-- Edge cases found: 3; default TLS fallback, independent Agent upstream failure, and post-reload identity drift are guarded.
+- Edge cases found: 4; default TLS fallback, independent Agent upstream failure, post-reload identity drift, and graceful-reload propagation delay are guarded.
 - Questions awaiting review: 0.
 - Next session should read this recovery session and `scripts/configure-nginx.sh` before changing virtual-host behavior.
