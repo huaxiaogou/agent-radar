@@ -4,7 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 
-import { chooseSignalSlug, ruleAnalysis, scoreRelevance } from "../radar/analyze.mjs";
+import {
+  analyzeItem,
+  chooseSignalSlug,
+  deepSeekAnalysis,
+  resolveAnalysisProvider,
+  ruleAnalysis,
+  scoreRelevance,
+} from "../radar/analyze.mjs";
 import { canonicalizeUrl, cleanText } from "../radar/fetch.mjs";
 
 let dataDirectory;
@@ -120,6 +127,100 @@ test("optional OpenAI analysis uses a strict structured response and remains par
   }
 });
 
+test("analysis provider selection is explicit and preserves existing OpenAI deployments", () => {
+  assert.equal(resolveAnalysisProvider({}), "rules");
+  assert.equal(resolveAnalysisProvider({ DEEPSEEK_API_KEY: "deepseek-key" }), "deepseek");
+  assert.equal(resolveAnalysisProvider({ OPENAI_API_KEY: "openai-key", DEEPSEEK_API_KEY: "deepseek-key" }), "openai");
+  assert.equal(resolveAnalysisProvider({ RADAR_AI_PROVIDER: "deepseek", DEEPSEEK_API_KEY: "deepseek-key" }), "deepseek");
+  assert.equal(resolveAnalysisProvider({ RADAR_AI_PROVIDER: "rules", OPENAI_API_KEY: "openai-key" }), "rules");
+  assert.equal(resolveAnalysisProvider({ RADAR_DISABLE_AI: "1", DEEPSEEK_API_KEY: "deepseek-key" }), "rules");
+  assert.equal(resolveAnalysisProvider({ RADAR_DISABLE_OPENAI: "1", OPENAI_API_KEY: "openai-key", DEEPSEEK_API_KEY: "deepseek-key" }), "deepseek");
+  assert.throws(() => resolveAnalysisProvider({ RADAR_AI_PROVIDER: "unknown" }), /RADAR_AI_PROVIDER/);
+});
+
+test("DeepSeek analysis uses JSON Output and records the real provider", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.DEEPSEEK_API_KEY;
+  const originalModel = process.env.RADAR_DEEPSEEK_MODEL;
+  const originalBaseUrl = process.env.RADAR_DEEPSEEK_BASE_URL;
+  let requestUrl;
+  let requestBody;
+  let requestHeaders;
+  process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+  process.env.RADAR_DEEPSEEK_MODEL = "deepseek-v4-flash";
+  delete process.env.RADAR_DEEPSEEK_BASE_URL;
+  globalThis.fetch = async (url, init) => {
+    requestUrl = String(url);
+    requestBody = JSON.parse(init.body);
+    requestHeaders = init.headers;
+    return new Response(JSON.stringify({
+      choices: [{
+        finish_reason: "stop",
+        message: {
+          content: JSON.stringify({
+            title: "Agent Harness 进入稳定工程层",
+            summary: "官方来源发布了包含工具循环、审批与遥测的稳定 Agent Harness。",
+            implication: "评估时应将模型与 Harness 分开，并验证权限、恢复和运行 trace。",
+            topic: "工程",
+            conceptSlug: "agent-harness",
+            stage: "Validated",
+            accent: "engineering",
+            tags: ["agent-harness", "runtime"],
+          }),
+        },
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const result = await deepSeekAnalysis({
+      title: "Agent Harness release", excerpt: "Stable runtime with approvals and telemetry.", contentText: "",
+      sourceName: "Official Engineering", sourceClass: "一手工程", url: "https://example.com/harness", publishedAt: null,
+    });
+    assert.equal(result.analysisMode, "deepseek");
+    assert.equal(result.conceptSlug, "agent-harness");
+    assert.equal(requestUrl, "https://api.deepseek.com/chat/completions");
+    assert.equal(requestHeaders.authorization, "Bearer test-deepseek-key");
+    assert.equal(requestBody.model, "deepseek-v4-flash");
+    assert.deepEqual(requestBody.response_format, { type: "json_object" });
+    assert.deepEqual(requestBody.thinking, { type: "disabled" });
+    assert.match(requestBody.messages[0].content, /JSON/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = originalKey;
+    if (originalModel === undefined) delete process.env.RADAR_DEEPSEEK_MODEL;
+    else process.env.RADAR_DEEPSEEK_MODEL = originalModel;
+    if (originalBaseUrl === undefined) delete process.env.RADAR_DEEPSEEK_BASE_URL;
+    else process.env.RADAR_DEEPSEEK_BASE_URL = originalBaseUrl;
+  }
+});
+
+test("DeepSeek empty responses retry once and then fall back to rules", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.DEEPSEEK_API_KEY;
+  let attempts = 0;
+  process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+  globalThis.fetch = async () => {
+    attempts += 1;
+    return new Response(JSON.stringify({
+      choices: [{ finish_reason: "stop", message: { content: "" } }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const result = await analyzeItem({
+      title: "Agent Harness release", excerpt: "Stable runtime with approvals and telemetry.", contentText: "",
+      sourceName: "Official Engineering", sourceClass: "一手工程", url: "https://example.com/harness", publishedAt: null,
+    }, "deepseek");
+    assert.equal(attempts, 2);
+    assert.equal(result.analysisMode, "rules");
+    assert.match(result.analysisError, /空内容/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = originalKey;
+  }
+});
+
 test("SQLite article writes are idempotent", async () => {
   const { beginRun, finishRun, insertArticle, openDatabase, updateSourceHealth, upsertSourceCatalog } = await import("../radar/database.mjs");
   const database = openDatabase();
@@ -133,15 +234,15 @@ test("SQLite article writes are idempotent", async () => {
     publishedAt: "2026-08-01T00:00:00.000Z", discoveredAt: "2026-08-01T01:00:00.000Z", contentHash: "hash",
     relevanceScore: 10, signalSlug: "agent-harness-test", conceptSlug: "agent-harness", title: "Agent Harness",
     summary: "A sufficiently long evidence summary for the test.", implication: "A sufficiently long engineering implication for the test.",
-    topic: "工程", stage: "Validated", accent: "engineering", tags: ["agent-harness"], analysisMode: "rules",
+    topic: "工程", stage: "Validated", accent: "engineering", tags: ["agent-harness"], analysisMode: "deepseek",
   };
   assert.equal(insertArticle(database, article), true);
   assert.equal(insertArticle(database, article), false);
   const finishedAt = new Date().toISOString();
-  const runId = beginRun(database, "test", "2026-08-01T00:00:00.000Z", "rules");
+  const runId = beginRun(database, "test", "2026-08-01T00:00:00.000Z", "deepseek");
   finishRun(database, runId, {
     finishedAt, status: "success", fetchedCount: 1, acceptedCount: 1,
-    skippedCount: 0, errorCount: 0, analysisMode: "rules", message: "test",
+    skippedCount: 0, errorCount: 0, analysisMode: "deepseek", message: "test",
   });
   updateSourceHealth(database, { id: "test-source" }, {
     attemptedAt: finishedAt, status: "success", error: null, itemCount: 1,
@@ -151,6 +252,7 @@ test("SQLite article writes are idempotent", async () => {
   await writeSnapshotAtomic(snapshot);
   assert.equal(snapshot.status.mode, "live");
   assert.equal(snapshot.status.runStatus, "success");
+  assert.equal(snapshot.status.analysisMode, "deepseek");
   assert.equal(snapshot.signals.length, 1);
   database.close();
 });

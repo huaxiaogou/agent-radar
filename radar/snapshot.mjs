@@ -57,7 +57,7 @@ function groupSignals(rows) {
 
   return [...groups.entries()].map(([slug, articles]) => {
     const sorted = [...articles].sort((left, right) => {
-      const analysisWeight = Number(right.analysis_mode === "openai") - Number(left.analysis_mode === "openai");
+      const analysisWeight = Number(right.analysis_mode !== "rules") - Number(left.analysis_mode !== "rules");
       return analysisWeight || right.relevance_score - left.relevance_score || dateValue(eventAt(right)) - dateValue(eventAt(left));
     });
     const representative = sorted[0];
@@ -187,6 +187,9 @@ export async function buildSnapshot(database) {
   const latestRun = getLatestRun(database);
   const successfulRun = database.prepare("SELECT * FROM runs WHERE status IN ('success', 'partial') ORDER BY id DESC LIMIT 1").get() || null;
   const analysisModes = new Set(articleRows.map((article) => article.analysis_mode));
+  const analysisMode = analysisModes.size > 1
+    ? "mixed"
+    : analysisModes.values().next().value || "rules";
   const lastSuccessfulAt = successfulRun?.finished_at || null;
   const publicSignals = signals.map((signal) => {
     const publicSignal = { ...signal };
@@ -202,7 +205,7 @@ export async function buildSnapshot(database) {
       lastRunAt: latestRun?.finished_at || null,
       lastSuccessfulAt,
       runStatus: latestRun?.status || "never",
-      analysisMode: analysisModes.size > 1 ? "mixed" : analysisModes.has("openai") ? "openai" : "rules",
+      analysisMode,
       sourceCount: sources.length,
       healthySourceCount: sources.filter((source) => source.status === "正常").length,
       signalCount: signals.length,

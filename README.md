@@ -16,7 +16,7 @@ Agent Radar 是一个面向 AI Coding 与 Agent 工程实践的个人技术情�
 - 16 个首批来源，覆盖 RSS/Atom、GitHub Releases 和无 Feed 页面发现。
 - SQLite 保存原始文章、来源健康度和每次任务结果；页面读取原子 JSON 快照。
 - 关键词相关性过滤、URL 去重、近似事件聚类和概念归类。
-- 无密钥即可使用规则分析；配置 OpenAI API 后自动生成结构化中文工程分析。
+- 无密钥即可使用规则分析；可选择 DeepSeek 或 OpenAI 生成结构化中文工程分析，单篇失败自动降级。
 - systemd timer 每 4 小时采集，单一来源失败不会清空或阻断既有内容。
 
 网站是公开只读访问，不要求登录。采集入口仅存在于服务器脚本和 systemd，不对公网暴露写接口。
@@ -63,7 +63,7 @@ cd agent-radar
 npm ci
 chmod +x scripts/*.sh
 
-# 可选；不填写 OPENAI_API_KEY 时仍可完整运行规则分析
+# 可选；不填写任何模型 Key 时仍可完整运行规则分析
 cp .env.example .env.production
 chmod 600 .env.production
 
@@ -91,6 +91,37 @@ npm ci
 
 `stop.sh` 只会终止 PID 文件中且工作目录属于本项目的 Next.js 进程，不会按名称批量终止 Node。`restart.sh` 只负责安全停止、重新构建和启动。
 
+## AI 分析供应商
+
+分析层支持 `deepseek`、`openai`、`rules` 和 `auto`。推荐在服务器 `.env.production` 显式选择供应商；密钥不得提交到 Git。
+
+DeepSeek 配置：
+
+```dotenv
+RADAR_AI_PROVIDER=deepseek
+DEEPSEEK_API_KEY=你的DeepSeekKey
+RADAR_DEEPSEEK_MODEL=deepseek-v4-flash
+RADAR_DEEPSEEK_BASE_URL=https://api.deepseek.com
+```
+
+OpenAI 配置：
+
+```dotenv
+RADAR_AI_PROVIDER=openai
+OPENAI_API_KEY=你的OpenAIKey
+RADAR_OPENAI_MODEL=gpt-5.6-terra
+```
+
+`auto` 用于兼容既有部署：优先使用已配置的 OpenAI；没有 OpenAI Key、但存在 DeepSeek Key 时使用 DeepSeek；两个 Key 都没有时使用本地规则。`RADAR_AI_PROVIDER=rules` 或 `RADAR_DISABLE_AI=1` 可以强制关闭外部模型。
+
+供应商只分析本轮新收录文章。既有文章不会自动重算，以避免重复计费和历史结果无声漂移。模型返回空内容、超时、无效 JSON 或服务异常时会重试一次；仍失败则将该篇标记为规则分析，并把本轮任务标记为 `partial`。
+
+配置完成后可执行一次小额真实请求验证 Key、模型和结构化输出；命令不会打印密钥或分析正文：
+
+```bash
+npm run ai:check
+```
+
 ## 自动采集原理
 
 `agent-radar-ingest.timer` 每四小时触发一次独立的 oneshot 服务。每次运行依次完成：
@@ -98,7 +129,7 @@ npm ci
 1. 从 `config/sources.json` 读取正式来源注册表。
 2. 并发抓取 RSS/Atom、GitHub Releases 和 HTML 页面。
 3. 过滤非 AI Coding/Agent 工程内容，并按 URL、版本和标题相似度去重聚类。
-4. 使用规则引擎分析；存在 `OPENAI_API_KEY` 时优先使用 Responses API 结构化分析，失败自动回退规则。
+4. 按 `RADAR_AI_PROVIDER` 使用 DeepSeek Chat Completions、OpenAI Responses API 或本地规则生成结构化分析；外部模型失败自动回退规则。
 5. 在 `.data/agent-radar.sqlite` 中提交文章、来源健康度和任务记录。
 6. 生成 `.data/radar-snapshot.json` 临时文件，完整写入并同步后原子替换线上快照。
 

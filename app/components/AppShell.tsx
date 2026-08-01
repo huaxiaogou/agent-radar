@@ -18,7 +18,14 @@ function statusCopy(status?: RadarStatus) {
   if (status.mode === "seed") return { label: "初始数据", badge: "等待首次自动采集", className: "" };
   if (status.stale) return { label: "数据延迟", badge: "采集延迟 · 保留上次数据", className: "is-delayed" };
   if (status.runStatus === "partial") return { label: "部分更新", badge: "实时采集 · 部分来源异常", className: "is-partial" };
-  return { label: "实时采集", badge: `正式版 · ${status.analysisMode === "openai" ? "AI 分析" : status.analysisMode === "mixed" ? "混合分析" : "规则分析"}`, className: "is-live" };
+  const analysisLabel = status.analysisMode === "openai"
+    ? "OpenAI 分析"
+    : status.analysisMode === "deepseek"
+      ? "DeepSeek 分析"
+      : status.analysisMode === "mixed"
+        ? "混合分析"
+        : "规则分析";
+  return { label: "实时采集", badge: `正式版 · ${analysisLabel}`, className: "is-live" };
 }
 
 function verifiedTime(status?: RadarStatus) {

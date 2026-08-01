@@ -1,5 +1,29 @@
 # Implementation notes
 
+## AI provider session
+
+### Deviations
+
+- DeepSeek JSON Output guarantees JSON syntax but does not replace the existing strict field and enum contract. The adapter keeps local validation and one retry instead of treating provider compatibility as schema equivalence; revisit only if the provider exposes stable strict JSON Schema output.
+
+### Discovered edge cases
+
+- Existing servers may already contain an OpenAI Key. `auto` preserves that behavior, while an explicit `deepseek` selection prevents a second installed key from silently changing providers.
+- Historical articles retain their original `rules`, `openai`, or `deepseek` marker. New provider configuration only analyzes newly accepted URLs, so the public snapshot can correctly report `mixed` instead of silently rewriting history.
+- DeepSeek documents occasional empty JSON content. Empty, truncated, malformed, timed-out, rate-limited, and server-error responses retry once before the per-item rules fallback keeps ingestion available.
+
+### Questions for review
+
+- None. Provider selection and credentials remain server-owned runtime configuration; no key or historical backfill is included in this change.
+
+### Session summary
+
+- Deviations count: 1.
+- Most likely revisit: replace JSON Output plus local validation only if DeepSeek later offers a stable strict JSON Schema contract for this endpoint.
+- Edge cases found: 3; existing OpenAI deployments, mixed historical provider markers, and transient/invalid DeepSeek responses are handled.
+- Questions awaiting review: 0; the production credential remains intentionally unavailable locally.
+- Next session should read this session, `radar/analyze.mjs`, and the AI provider section in `README.md` before changing model behavior.
+
 ## Deviations
 
 - The generated UI database recommendation was an AI-purple chatbot/landing pattern. It was replaced with the reversible “signal cartography” direction because the product is an evidence dashboard, not a conversational product; revisit by replacing the master tokens only.

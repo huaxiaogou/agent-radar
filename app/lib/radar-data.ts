@@ -20,7 +20,7 @@ export type Signal = {
   sources: Array<{ name: string; href: string }>;
   publishedAt?: string;
   discoveredAt?: string;
-  analysisMode?: "curated" | "rules" | "openai";
+  analysisMode?: "curated" | "rules" | "openai" | "deepseek";
 };
 
 export type Concept = {
@@ -62,7 +62,7 @@ export type RadarStatus = {
   lastRunAt: string | null;
   lastSuccessfulAt: string | null;
   runStatus: "success" | "partial" | "failed" | "never";
-  analysisMode: "rules" | "openai" | "mixed" | "curated";
+  analysisMode: "rules" | "openai" | "deepseek" | "mixed" | "curated";
   sourceCount: number;
   healthySourceCount: number;
   signalCount: number;

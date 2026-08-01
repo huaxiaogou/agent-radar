@@ -1,5 +1,5 @@
 import { contentHash, enrichItem, discoverSourceItems } from "./fetch.mjs";
-import { analyzeItem, chooseSignalSlug, hasOpenAIAnalysis, scoreRelevance } from "./analyze.mjs";
+import { analyzeItem, chooseSignalSlug, resolveAnalysisProvider, scoreRelevance } from "./analyze.mjs";
 import {
   articleExists,
   beginRun,
@@ -64,10 +64,10 @@ function selectFairly(candidates, limit) {
 
 export async function runIngestion({ trigger = "manual", logger = console } = {}) {
   const sources = await loadSourceCatalog();
+  const analysisProvider = resolveAnalysisProvider();
   const database = openDatabase();
   const startedAt = new Date().toISOString();
-  const openAIEnabled = hasOpenAIAnalysis() && process.env.RADAR_DISABLE_OPENAI !== "1";
-  const preferredAnalysisMode = openAIEnabled ? "openai" : "rules";
+  const preferredAnalysisMode = analysisProvider;
   upsertSourceCatalog(database, sources);
   const runId = beginRun(database, trigger, startedAt, preferredAnalysisMode);
   let runFinished = false;
@@ -130,7 +130,7 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
       enriched,
       Number(process.env.RADAR_ANALYSIS_CONCURRENCY || 2),
       async (item, index) => {
-        const result = await analyzeItem(item, openAIEnabled && index < maxAIItems);
+        const result = await analyzeItem(item, index < maxAIItems ? analysisProvider : "rules");
         if (result.analysisError) {
           analysisFallbackCount += 1;
           logger.error?.(`[analysis:${item.url}] ${result.analysisError}`);
@@ -142,8 +142,8 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
     const since = new Date(Date.now() - 21 * 86_400_000).toISOString();
     const clusterCandidates = getRecentClusterCandidates(database, since).map((row) => ({ ...row }));
     const acceptedBySource = new Map();
+    const acceptedAnalysisModes = new Set();
     let acceptedCount = 0;
-    let openAICount = 0;
     for (const { item, analysis } of analyzed) {
       const signalSlug = chooseSignalSlug(item, analysis, clusterCandidates);
       const discoveredAt = new Date().toISOString();
@@ -170,7 +170,7 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
         continue;
       }
       acceptedCount += 1;
-      if (analysis.analysisMode === "openai") openAICount += 1;
+      acceptedAnalysisModes.add(analysis.analysisMode);
       acceptedBySource.set(item.sourceId, (acceptedBySource.get(item.sourceId) || 0) + 1);
       clusterCandidates.push({
         signal_slug: signalSlug,
@@ -192,7 +192,9 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
     }
 
     let status = failedSources === sources.length ? "failed" : failedSources || analysisFallbackCount ? "partial" : "success";
-    const analysisMode = openAICount && acceptedCount > openAICount ? "mixed" : openAICount ? "openai" : "rules";
+    const analysisMode = acceptedAnalysisModes.size > 1
+      ? "mixed"
+      : acceptedAnalysisModes.values().next().value || "rules";
     const message = [
       `${sources.length - failedSources}/${sources.length} sources succeeded`,
       `${acceptedCount} new articles`,
