@@ -3,6 +3,17 @@ import type { Signal } from "../lib/radar-data";
 import { EvidencePulse } from "./EvidencePulse";
 
 export function SignalCard({ signal, featured = false }: { signal: Signal; featured?: boolean }) {
+  const verificationCopy = signal.verificationState === "cross-verified"
+    ? "官方 + 独立来源交叉验证"
+    : signal.verificationState === "community-only"
+      ? "社区观察 · 等待交叉验证"
+      : signal.verificationState === "official-only"
+        ? "官方已确认 · 等待独立验证"
+        : signal.verificationState === "independently-observed"
+          ? "多位实践者独立观察"
+          : signal.verificationState === "practitioner-only"
+            ? "实践观察 · 等待更多来源"
+          : signal.confidence;
   return (
     <article className={`signal-card accent-${signal.accent}${featured ? " featured" : ""}`}>
       <div className="card-topline">
@@ -15,7 +26,8 @@ export function SignalCard({ signal, featured = false }: { signal: Signal; featu
       <div className="evidence-metrics" aria-label="证据概况">
         <span><b>{signal.evidenceCount}</b> 证据节点</span>
         <span><b>{signal.independentSources}</b> 独立来源</span>
-        <span><b>{signal.confidence}</b> 结论状态</span>
+        <span><b>{verificationCopy}</b> 结论状态</span>
+        {signal.sourceMix && <span><b>官 {signal.sourceMix.official} · 实 {signal.sourceMix.practitioner} · 社 {signal.sourceMix.community}</b> 来源结构</span>}
       </div>
       <div className="implication">
         <span>ENGINEERING READ</span>
@@ -24,7 +36,9 @@ export function SignalCard({ signal, featured = false }: { signal: Signal; featu
       <footer className="signal-footer">
         <div className="source-links">
           {signal.sources.map((source) => (
-            <a href={source.href} target="_blank" rel="noreferrer" key={source.href}>{source.name}<span aria-hidden="true"> ↗</span></a>
+            <a href={source.href} target="_blank" rel="noreferrer" data-source-layer={source.layer} key={source.href}>
+              {source.layer === "official" ? "官方" : source.layer === "practitioner" ? "实践" : source.layer === "community" ? "社区" : "来源"} · {source.name}<span aria-hidden="true"> ↗</span>
+            </a>
           ))}
         </div>
         <Link href={`/concepts/${signal.conceptSlug ?? signal.slug}`} className="detail-link">打开分析 <span aria-hidden="true">→</span></Link>

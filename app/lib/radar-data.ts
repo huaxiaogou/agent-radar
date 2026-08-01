@@ -3,6 +3,17 @@ export type EvidenceNode = {
   kind: "origin" | "independent" | "implementation" | "conflict";
 };
 
+export type SourceLayer = "official" | "practitioner" | "community";
+
+export type SignalSource = {
+  name: string;
+  href: string;
+  layer?: SourceLayer;
+  language?: "zh" | "en";
+  originalTitle?: string;
+  publishedAt?: string;
+};
+
 export type Signal = {
   slug: string;
   conceptSlug?: string;
@@ -18,7 +29,9 @@ export type Signal = {
   confidence: "待溯源" | "中等" | "较高";
   accent: "signal" | "evidence" | "engineering" | "conflict";
   evidence: EvidenceNode[];
-  sources: Array<{ name: string; href: string }>;
+  sources: SignalSource[];
+  sourceMix?: Record<SourceLayer, number>;
+  verificationState?: "community-only" | "official-only" | "cross-verified" | "independently-observed" | "practitioner-only";
   publishedAt?: string;
   discoveredAt?: string;
   analysisMode?: "curated" | "rules" | "openai" | "deepseek";
@@ -34,6 +47,15 @@ export type Concept = {
   signalCount?: number;
 };
 
+export type CandidateConcept = {
+  name: string;
+  signalCount: number;
+  evidenceCount: number;
+  highestEvidenceLayer: SourceLayer;
+  lastSeenAt: string;
+  sources: Array<SignalSource & { layer: SourceLayer }>;
+};
+
 export type RadarSource = {
   id?: string;
   name: string;
@@ -47,6 +69,19 @@ export type RadarSource = {
   lastSuccessAt?: string | null;
   lastError?: string | null;
   itemCount?: number;
+  layer?: SourceLayer;
+  language?: "zh" | "en";
+};
+
+export type ModelPulseWindow = Record<SourceLayer, number> & { total: number };
+
+export type ModelPulse = {
+  modelId: string;
+  windows: {
+    days7: ModelPulseWindow;
+    days30: ModelPulseWindow;
+  };
+  sources: Array<SignalSource & { layer: SourceLayer }>;
 };
 
 export type RadarDigest = {
@@ -76,10 +111,12 @@ export type RadarSnapshot = {
   status: RadarStatus;
   signals: Signal[];
   concepts: Concept[];
+  candidateConcepts: CandidateConcept[];
   sources: RadarSource[];
   relations: Array<{ from: string; type: string; to: string; note: string }>;
   playbooks: Array<{ title: string; description: string; steps: number; maturity: string }>;
   digests: RadarDigest[];
+  modelPulses: ModelPulse[];
 };
 
 export const signals: Signal[] = [
@@ -339,8 +376,10 @@ export const seedRadarSnapshot: RadarSnapshot = {
   },
   signals,
   concepts,
+  candidateConcepts: [],
   sources,
   relations,
   playbooks,
   digests,
+  modelPulses: [],
 };

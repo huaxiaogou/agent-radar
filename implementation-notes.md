@@ -211,3 +211,55 @@
 - Edge cases found: 10; live price drift, promotions, cache-sensitive pricing, lost concept identity, duplicate sources, mobile overflow, cross-concept version clustering, stale active-provider inference, source-window ordering and marker density are handled.
 - Questions awaiting review: 3; staged source expansion, taxonomy candidates and the Chinese editorial publishing contract.
 - Next session should read this session, `app/lib/model-data.ts`, and the evidence boundaries on `/models` before changing comparisons or automation.
+
+## Multilingual intelligence quality session
+
+### Confirmed product decisions
+
+- Source expansion is not staged as a future P0. This session must ship a complete first production registry spanning global official sources, Chinese official/team sources, English community, Chinese community and independent practitioners.
+- Community discussion is a first-class discovery signal, not a substitute for an official fact. The product must show which layer supports a claim and must never promote community repetition alone to high confidence.
+- `/models` must expose full model names in its primary visualization. Short codes such as `O·SOL` and `A·FAB` are not acceptable as the main reading language.
+- The four-hour job may update model discussion pulse and source health. Capability bands, context and prices remain dated editorial facts and must not silently change from community text or an LLM response.
+
+### Audit findings before implementation
+
+- The current pre-filter runs before article enrichment and only recognizes a narrow English vocabulary, so Chinese engineering discussion is systematically missed.
+- DeepSeek/OpenAI currently summarize only the first configured subset of new items. Their output does not participate in a publish/watch/reject decision or final signal ranking; calling this “AI 精排” would be inaccurate.
+- The fixed taxonomy silently defaults unmatched material to `coding-agent`, which hides genuinely new concept candidates and creates misleading clusters.
+- Source classes currently have no explicit official/practitioner/community layer, and the confidence calculation can treat several community groups as “较高” without any primary evidence.
+- The model capability chart encodes names as private abbreviations, and `/models` has no dynamic field tied to ingestion even though the surrounding site advertises live collection.
+
+### Risk boundaries
+
+- Only public, no-login feeds and APIs may be integrated. Login walls, access-control bypasses, copied cookies and unofficial scraping workarounds remain out of scope.
+- Broad community feeds are noisy and can contain prompt injection, spam or coordinated repetition. They must pass deterministic recall, content enrichment, structured editorial analysis and layer-aware evidence rules before publication.
+- Generated Chinese analysis must remain a concise source-backed synthesis with original links; it must not republish full copyrighted articles or present an LLM inference as source fact.
+
+### Deviations
+
+- The user-provided broad source list was adopted selectively instead of being imported with equal weight. Stable public feeds enter the registry, but finance, generic model rankings, strong-login communities and podcasts without text transcripts remain outside the automated publishing chain.
+- The product does not divide sources into domestic and international sections. `language` remains internal metadata for parsing, Chinese synthesis and original-language labels; evidence responsibility is defined only by official, practitioner/technical-media and community layers.
+- Source `cadence` is now enforced for systemd runs instead of being display-only. The four-hour timer wakes the job, then each source is checked against its 4h/8h/12h/24h interval; manual ingestion intentionally scans all enabled sources.
+
+### Discovered edge cases
+
+- A public GitHub Issues JSON endpoint can exhaust the unauthenticated shared-IP quota. The connector therefore uses the public issue-list HTML with an exact issue-URL allowlist; it neither signs in nor bypasses access controls.
+- The documented Bluesky `public.api` host returned 403 in one probe while `api.bsky.app` returned a public JSON response. The enabled connector uses the verified AppView host and remains isolated by per-source health handling.
+- Reddit's `/new.rss` and `old.reddit.com` variants were intermittently blocked; the public subreddit `.rss?raw_json=1` endpoint was the stable no-login variant in the current probe.
+- The first model alias catalog retained historical Claude/Gemini IDs, which would have made most current model pulses permanently zero. A bidirectional test now requires exact parity between the eight model records and pulse aliases.
+- Re-scoring after enrichment was initially nominal because relevance inspected only title and feed excerpt. It now includes `contentText`, and a regression test proves that engineering terms found only in the fetched body can enter the candidate set.
+- Older source-window tests compared the exact `{name, href}` object shape. They now preserve the same latest-eight ordering and URL deduplication contract while also checking evidence layer, original title, language and publication time.
+- A removed or disabled source remained in historical SQLite health rows and incorrectly changed a successful 39/39 run into a 40/41 status. The catalog now atomically marks only the current enabled set active; historical rows remain for article foreign keys but are excluded from live health counts.
+- `candidate_concept` was persisted but never consumed, while `watch` items were discarded before persistence. A watch item with a non-empty candidate is now retained as an isolated discovery record: it appears only in `/concepts` under “待溯源概念候选”, preserves evidence-layered original links, and cannot enter signals or the canonical concept grid.
+- A 375px browser check found that the hidden accessible text inside the wide model table could enlarge the document scroll geometry even though the table had its own scroll container. Root horizontal overflow is clipped while the navigation and exact table retain their explicit horizontal scroll regions.
+- A first SSRF guard validated DNS before calling `fetch`, which left a rebinding window and missed hexadecimal IPv4-mapped IPv6 forms such as `::ffff:7f00:1`. Every HTTPS hop now parses IPv6 into bytes, rejects mapped private/loopback ranges, and passes the already-validated address set to a pinned Undici dispatcher used by the real TLS connection. Test-only fetch injection is explicit and cannot fabricate a public resolver. Each dispatcher is intentionally closed after its bounded response instead of sharing address state across source lifecycles; non-success and oversized bodies are cancelled, and unframed streams stop at the 5 MiB boundary.
+- The enrichment cap originally doubled as the final publication cap. Once enabled sources outgrow that cap, later sources could be starved before their article bodies were inspected. Fair selection now takes at least the first candidate from every due source; the final publish cap remains independent, while the default AI calls remain bounded by that publish cap and `RADAR_MAX_AI_ITEMS` can lower it further.
+- A persisted `watch` candidate could be promoted in place but could not be withdrawn after a later `reject` decision. Rejection now refreshes the same audit row with the reviewed body, hash and scores, clears its candidate name, and removes it from public/candidate snapshot queries without deleting history. `reject` is terminal for that URL, while `watch` remains re-reviewable; only published rows may seed signal clustering.
+
+### Session summary
+
+- The registry now covers 39 public no-login sources across official/team releases, practitioners and technical media, targeted research, and Chinese/English developer communities.
+- The pipeline performs multilingual recall, body enrichment, deterministic re-scoring, structured AI publish/watch/reject analysis, editorial ranking, event-key clustering, evidence-layer confidence and atomic publication.
+- `/discussions` exposes community discovery with original links; `/models` uses full names and separates dated capability/price facts from timer-updated 7/30-day discussion pulses.
+- Real no-key ingestion probes against the expanded registry completed after connector repair. The final pinned-DNS transport probe reported 39/39 enabled sources healthy, 453 fetched items, eight accepted articles and zero source errors; it also correctly excluded retired source records from status.
+- Remaining external validation is production-host network health and the configured DeepSeek account's real batch latency/quota; local tests cannot prove either.

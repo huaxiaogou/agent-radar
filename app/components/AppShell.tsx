@@ -1,17 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { RadarStatus } from "../lib/radar-data";
-
-const navItems = [
-  ["today", "/today", "TODAY", "今日"],
-  ["signals", "/signals", "SIG", "信号"],
-  ["concepts", "/concepts", "CON", "概念"],
-  ["models", "/models", "MOD", "模型"],
-  ["graph", "/graph", "MAP", "关系"],
-  ["playbooks", "/playbooks", "PLAY", "方法"],
-  ["sources", "/sources", "SRC", "来源"],
-  ["digests", "/digests", "LOG", "简报"],
-] as const;
+import { PrimaryNav } from "./PrimaryNav";
 
 function statusCopy(status?: RadarStatus) {
   if (!status) return { label: "初始数据", badge: "等待首次自动采集", className: "" };
@@ -52,14 +42,7 @@ export function AppShell({ active, children, status }: { active: string; childre
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
           <span className="brand-type">AR<span>／26</span></span>
         </Link>
-        <nav className="side-nav">
-          {navItems.map(([id, href, code, label]) => (
-            <Link href={href} className={active === id ? "nav-link active" : "nav-link"} key={id} aria-current={active === id ? "page" : undefined}>
-              <span>{code}</span>
-              <b>{label}</b>
-            </Link>
-          ))}
-        </nav>
+        <PrimaryNav active={active} />
         <div className="sidebar-foot">
           <span className={`status-light ${copy.className}`} aria-hidden="true" />
           <span>{copy.label}</span>

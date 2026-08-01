@@ -22,6 +22,19 @@ const conceptFixture = {
   secondSourceUrl: "https://example.com/official-agent-harness-telemetry",
 };
 
+const discussionFixture = {
+  chineseTitle: "多智能体编排在真实代码库里如何验收？",
+  chineseUrl: "https://github.com/example-cn/agent-coding/issues/88",
+  englishTitle: "How we debug long-running agent harnesses",
+  englishUrl: "https://news.ycombinator.com/item?id=424242",
+};
+
+const candidateConceptFixture = {
+  name: "Agent Reliability Engineering",
+  communityUrl: "https://github.com/example-cn/agent-coding/issues/89",
+  practitionerUrl: "https://practitioner.example.com/agent-reliability-engineering",
+};
+
 async function createProductionSnapshotFixture() {
   dataDirectory = await mkdtemp(`${os.tmpdir()}/agent-radar-rendered-`);
   process.env.RADAR_DATA_DIR = dataDirectory;
@@ -49,7 +62,39 @@ async function createProductionSnapshotFixture() {
       focus: "Agent Harness",
       independentGroup: "agent-harness-official",
     };
-    upsertSourceCatalog(database, [source]);
+    const discussionSources = [
+      {
+        id: "rendered-chinese-community",
+        name: "中文 Agent 社区",
+        homepage: "https://github.com/example-cn/agent-coding/issues",
+        class: "中文社区",
+        priority: "P1",
+        cadence: "4h",
+        focus: "多智能体编排 · AI Coding",
+        independentGroup: "rendered-chinese-community",
+      },
+      {
+        id: "rendered-english-community",
+        name: "Hacker News",
+        homepage: "https://news.ycombinator.com/",
+        class: "英文社区",
+        priority: "P1",
+        cadence: "4h",
+        focus: "Agent Harness · Durable execution",
+        independentGroup: "rendered-english-community",
+      },
+    ];
+    const candidatePractitionerSource = {
+      id: "rendered-candidate-practitioner",
+      name: "Independent Agent Engineer",
+      homepage: "https://practitioner.example.com",
+      class: "实践者",
+      priority: "P1",
+      cadence: "8h",
+      focus: candidateConceptFixture.name,
+      independentGroup: "rendered-candidate-practitioner",
+    };
+    upsertSourceCatalog(database, [source, ...discussionSources, candidatePractitionerSource]);
     const signalSlug = chooseSignalSlug(
       { title: "Agent Harness adds durable approvals" },
       { conceptSlug: conceptFixture.conceptSlug, tags: ["agent-harness", "durable-execution"] },
@@ -89,6 +134,129 @@ async function createProductionSnapshotFixture() {
       analysisMode: "deepseek",
     }), true);
     assert.equal(insertArticle(database, {
+      url: discussionFixture.chineseUrl,
+      sourceId: discussionSources[0].id,
+      sourceName: discussionSources[0].name,
+      sourceClass: discussionSources[0].class,
+      independentGroup: discussionSources[0].independentGroup,
+      originalTitle: discussionFixture.chineseTitle,
+      originalExcerpt: "中文开发者讨论多智能体任务拆分、验收和失败恢复。",
+      contentText: "中文开发者讨论多智能体任务拆分、验收和失败恢复。",
+      publishedAt: "2026-08-01T06:30:00.000Z",
+      discoveredAt: collectedAt,
+      contentHash: "rendered-chinese-discussion",
+      relevanceScore: 10,
+      signalSlug: chooseSignalSlug(
+        { title: discussionFixture.chineseTitle },
+        { conceptSlug: "multi-agent-orchestration", tags: ["multi-agent-orchestration"] },
+        [],
+      ),
+      conceptSlug: "multi-agent-orchestration",
+      title: "中文社区正在验证多智能体编排的验收边界",
+      summary: "讨论聚焦真实代码库中的角色拆分、验收责任和失败恢复。",
+      implication: "社区讨论只能形成候选脉冲，需要官方或独立实践证据交叉验证。",
+      topic: "工程",
+      stage: "Spark",
+      accent: "signal",
+      tags: ["multi-agent-orchestration"],
+      analysisMode: "deepseek",
+    }), true);
+    assert.equal(insertArticle(database, {
+      url: discussionFixture.englishUrl,
+      sourceId: discussionSources[1].id,
+      sourceName: discussionSources[1].name,
+      sourceClass: discussionSources[1].class,
+      independentGroup: discussionSources[1].independentGroup,
+      originalTitle: discussionFixture.englishTitle,
+      originalExcerpt: "An English discussion about checkpoints and traces for long-running coding agents.",
+      contentText: "An English discussion about checkpoints and traces for long-running coding agents.",
+      publishedAt: "2026-08-01T06:45:00.000Z",
+      discoveredAt: collectedAt,
+      contentHash: "rendered-english-discussion",
+      relevanceScore: 9,
+      signalSlug: chooseSignalSlug(
+        { title: discussionFixture.englishTitle },
+        { conceptSlug: "coding-agent", tags: ["coding-agent", "agent-harness"] },
+        [],
+      ),
+      conceptSlug: "coding-agent",
+      title: "英文社区讨论长任务 Agent Harness 的调试方法",
+      summary: "讨论聚焦检查点、运行 trace 和长任务失败定位。",
+      implication: "把讨论沉淀为可重复故障注入和恢复验证，再判断是否具有生产价值。",
+      topic: "工程",
+      stage: "Spark",
+      accent: "signal",
+      tags: ["coding-agent", "agent-harness"],
+      analysisMode: "deepseek",
+    }), true);
+    const candidateSignalSlug = "agent-reliability-engineering-candidate";
+    assert.equal(insertArticle(database, {
+      url: candidateConceptFixture.communityUrl,
+      sourceId: discussionSources[0].id,
+      sourceName: discussionSources[0].name,
+      sourceClass: discussionSources[0].class,
+      independentGroup: discussionSources[0].independentGroup,
+      sourceLayer: "community",
+      sourceLanguage: "zh",
+      originalTitle: "社区提出 Agent Reliability Engineering 这一候选名称",
+      originalExcerpt: "社区讨论长任务 Agent 的恢复、验收和可靠性工程。",
+      contentText: "社区讨论长任务 Agent 的恢复、验收和可靠性工程。",
+      publishedAt: "2026-08-01T06:50:00.000Z",
+      discoveredAt: collectedAt,
+      contentHash: "rendered-candidate-community",
+      relevanceScore: 9,
+      signalSlug: candidateSignalSlug,
+      conceptSlug: "coding-agent",
+      title: "Agent Reliability Engineering 成为待溯源概念候选",
+      summary: "模型从社区讨论中抽取这一名称，但尚未证明它已形成稳定定义。",
+      implication: "保留原文和证据层级，等待独立工程材料交叉验证。",
+      topic: "概念",
+      stage: "Spark",
+      accent: "signal",
+      tags: ["coding-agent", "reliability"],
+      analysisMode: "deepseek",
+      publishDecision: "publish",
+      editorialScore: 68,
+      aiRelevanceScore: 76,
+      noveltyScore: 78,
+      evidenceScore: 50,
+      eventKey: "agent-reliability-engineering:origin",
+      candidateConcept: candidateConceptFixture.name,
+    }), true);
+    assert.equal(insertArticle(database, {
+      url: candidateConceptFixture.practitionerUrl,
+      sourceId: candidatePractitionerSource.id,
+      sourceName: candidatePractitionerSource.name,
+      sourceClass: candidatePractitionerSource.class,
+      independentGroup: candidatePractitionerSource.independentGroup,
+      sourceLayer: "practitioner",
+      sourceLanguage: "en",
+      originalTitle: "A field note on Agent Reliability Engineering",
+      originalExcerpt: "An independent engineering note on recovery and acceptance evidence.",
+      contentText: "An independent engineering note on recovery and acceptance evidence.",
+      publishedAt: "2026-08-01T06:55:00.000Z",
+      discoveredAt: collectedAt,
+      contentHash: "rendered-candidate-practitioner",
+      relevanceScore: 10,
+      signalSlug: candidateSignalSlug,
+      conceptSlug: "coding-agent",
+      title: "独立实践者补充 Agent Reliability Engineering 证据",
+      summary: "实践文章给出恢复与验收方法，但候选名称仍需继续溯源。",
+      implication: "把工程观察作为较高层证据展示，不自动晋升正式概念。",
+      topic: "概念",
+      stage: "Spark",
+      accent: "evidence",
+      tags: ["coding-agent", "reliability"],
+      analysisMode: "deepseek",
+      publishDecision: "publish",
+      editorialScore: 74,
+      aiRelevanceScore: 82,
+      noveltyScore: 76,
+      evidenceScore: 70,
+      eventKey: "agent-reliability-engineering:origin",
+      candidateConcept: candidateConceptFixture.name,
+    }), true);
+    assert.equal(insertArticle(database, {
       url: conceptFixture.secondSourceUrl,
       sourceId: source.id,
       sourceName: source.name,
@@ -116,8 +284,8 @@ async function createProductionSnapshotFixture() {
     finishRun(database, runId, {
       finishedAt: collectedAt,
       status: "success",
-      fetchedCount: 2,
-      acceptedCount: 2,
+      fetchedCount: 6,
+      acceptedCount: 6,
       skippedCount: 0,
       errorCount: 0,
       analysisMode: "deepseek",
@@ -128,6 +296,20 @@ async function createProductionSnapshotFixture() {
       status: "success",
       error: null,
       itemCount: 2,
+    });
+    for (const discussionSource of discussionSources) {
+      updateSourceHealth(database, discussionSource, {
+        attemptedAt: collectedAt,
+        status: "success",
+        error: null,
+        itemCount: 1,
+      });
+    }
+    updateSourceHealth(database, candidatePractitionerSource, {
+      attemptedAt: collectedAt,
+      status: "success",
+      error: null,
+      itemCount: 1,
     });
     const snapshot = await buildSnapshot(database);
     const oldSnapshotSignal = snapshot.signals.find((item) => item.slug === secondSignalSlug);
@@ -217,13 +399,14 @@ test("server-renders the Agent Radar experience and social metadata", async () =
   assert.match(html, /href="\/today"/);
   assert.match(html, /href="\/concepts"/);
   assert.match(html, /href="\/models"/);
+  assert.match(html, /href="\/discussions"/);
   assert.match(html, /name="theme-color" content="#f2f6f8"/);
   assert.match(html, /property="og:image" content="http:\/\/127\.0\.0\.1:\d+\/og.png"/);
   assert.doesNotMatch(html, /codex-preview|Building your site|react-loading-skeleton/i);
 });
 
 test("primary routes render with a heading and skip link", async () => {
-  const routes = ["/today", "/signals", "/concepts", "/concepts/graph-engineering", "/graph", "/models", "/playbooks", "/sources", "/digests", "/search"];
+  const routes = ["/today", "/signals", "/concepts", "/concepts/graph-engineering", "/graph", "/models", "/discussions", "/playbooks", "/sources", "/digests", "/search"];
   for (const route of routes) {
     const response = await render(route);
     assert.equal(response.status, 200, route);
@@ -293,6 +476,47 @@ test("model atlas compares coding, everyday capability and price with evidence i
   assert.ok($("[aria-label*='模型'][aria-label*='能力']").length >= 1, "能力图需要可访问名称");
   assert.equal($("a[href='/models'][aria-current='page']").length, 1, "模型导航必须精确标记当前页");
   assert.doesNotMatch(mainText, /RADAR ACTIVE|本站当前分析模型/, "没有任何运行时 API key 时，旧 DeepSeek 快照不能冒充当前 active provider");
+  assert.doesNotMatch(mainText, /O·SOL|O·TER|A·FAB|A·OPU|A·SON|G·FLA|D·PRO|D·FLS/, "可视图必须展示完整模型名，不能要求读者翻译内部代号");
+  assert.match(mainText, /能力.{0,8}价格.{0,12}核验日期/);
+  assert.match(mainText, /社区讨论脉冲.{0,12}定时采集更新/);
+});
+
+test("discussions page exposes bilingual community evidence layers and original links", async () => {
+  const response = await render("/discussions");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  const $ = load(html);
+  const mainText = $("main").text().replace(/\s+/g, " ");
+
+  assert.match($("h1").first().text(), /社区讨论|Discussions/i);
+  assert.equal($("a[href='/discussions'][aria-current='page']").length, 1);
+  const chinese = $("[data-discussion-language='zh'][data-source-layer='community']");
+  const english = $("[data-discussion-language='en'][data-source-layer='community']");
+  assert.ok(chinese.length >= 1, "必须展示中文社区讨论");
+  assert.ok(english.length >= 1, "必须展示英文社区讨论");
+  assert.match(mainText, new RegExp(discussionFixture.chineseTitle));
+  assert.match(mainText, new RegExp(discussionFixture.englishTitle));
+  assert.equal(chinese.find(`a[href='${discussionFixture.chineseUrl}']`).length, 1);
+  assert.equal(english.find(`a[href='${discussionFixture.englishUrl}']`).length, 1);
+  assert.match(mainText, /官方|实践者|社区/);
+});
+
+test("concepts page renders traceable candidates separately from the established concept catalog", async () => {
+  const response = await render("/concepts");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  const $ = load(html);
+  const candidateSection = $("main section").filter((_index, section) => /待溯源概念候选/.test($(section).text())).first();
+
+  assert.equal(candidateSection.length, 1, "概念页必须有独立的“待溯源概念候选”区");
+  assert.match(candidateSection.text(), new RegExp(candidateConceptFixture.name));
+  assert.equal(candidateSection.find(`a[href='${candidateConceptFixture.communityUrl}']`).length, 1);
+  assert.equal(candidateSection.find(`a[href='${candidateConceptFixture.practitionerUrl}']`).length, 1);
+  assert.doesNotMatch(
+    $(".concept-grid").text(),
+    new RegExp(candidateConceptFixture.name),
+    "候选不得伪装成已建立概念卡片",
+  );
 });
 
 test("concept detail binds a hashed live signal to its concept and renders the original source", async () => {

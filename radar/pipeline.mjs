@@ -5,8 +5,10 @@ import {
   beginRun,
   finishRun,
   getRecentClusterCandidates,
+  getSourceHealth,
   insertArticle,
   openDatabase,
+  retireWatchedArticle,
   updateSourceHealth,
   upsertSourceCatalog,
 } from "./database.mjs";
@@ -40,7 +42,7 @@ function withinAgeLimit(value) {
   return Date.now() - new Date(value).getTime() <= maxDays * 86_400_000;
 }
 
-function selectFairly(candidates, limit) {
+export function selectFairly(candidates, limit) {
   const queues = new Map();
   for (const candidate of candidates) {
     const queue = queues.get(candidate.sourceId) || [];
@@ -48,39 +50,103 @@ function selectFairly(candidates, limit) {
     queues.set(candidate.sourceId, queue);
   }
   const selected = [];
-  while (selected.length < limit) {
+  const enrichmentLimit = Math.max(limit, queues.size);
+  while (selected.length < enrichmentLimit) {
     let progressed = false;
     for (const queue of queues.values()) {
       const candidate = queue.shift();
       if (!candidate) continue;
       selected.push(candidate);
       progressed = true;
-      if (selected.length >= limit) break;
+      if (selected.length >= enrichmentLimit) break;
     }
     if (!progressed) break;
   }
   return selected;
 }
 
-export async function runIngestion({ trigger = "manual", logger = console } = {}) {
+function aiItemLimit(publishLimit) {
+  const configured = String(process.env.RADAR_MAX_AI_ITEMS || "").trim();
+  if (!configured) return publishLimit;
+  const value = Number(configured);
+  if (!Number.isInteger(value) || value < 0) throw new Error("RADAR_MAX_AI_ITEMS 必须是非负整数");
+  return Math.min(value, publishLimit);
+}
+
+function finalRelevanceScore(ruleScore, analysis) {
+  const aiScore = Number(analysis.relevanceScore);
+  if (!Number.isFinite(aiScore)) return ruleScore;
+  return Math.max(0, Math.min(100, Math.round((ruleScore + (aiScore - 50) / 12.5) * 10) / 10));
+}
+
+function persistedArticle(item, analysis, relevanceScore, signalSlug = null) {
+  return {
+    ...item,
+    originalTitle: item.title,
+    originalExcerpt: item.excerpt || "",
+    contentText: item.contentText || item.excerpt || "",
+    discoveredAt: new Date().toISOString(),
+    contentHash: contentHash(item.title, item.excerpt || "", item.contentText || ""),
+    relevanceScore,
+    signalSlug,
+    conceptSlug: analysis.conceptSlug,
+    title: analysis.title,
+    summary: analysis.summary,
+    implication: analysis.implication,
+    topic: analysis.topic,
+    stage: analysis.stage,
+    accent: analysis.accent,
+    tags: analysis.tags,
+    analysisMode: analysis.analysisMode,
+    publishDecision: analysis.publishDecision,
+    editorialScore: analysis.editorialScore,
+    aiRelevanceScore: analysis.relevanceScore,
+    noveltyScore: analysis.noveltyScore,
+    evidenceScore: analysis.evidenceScore,
+    eventKey: analysis.eventKey,
+    candidateConcept: analysis.candidateConcept,
+  };
+}
+
+export function isSourceDue(source, { trigger = "manual", lastAttemptAt = null, now = new Date().toISOString() } = {}) {
+  const match = /^(4|8|12|24)h$/.exec(String(source?.cadence || "").trim());
+  if (!match) throw new Error(`来源采集周期 cadence 无效：${source?.cadence || "未配置"}`);
+  if (trigger !== "systemd") return true;
+  if (!lastAttemptAt) return true;
+  const nowTime = new Date(now).getTime();
+  const lastAttemptTime = new Date(lastAttemptAt).getTime();
+  if (!Number.isFinite(nowTime)) throw new Error(`当前调度时间无效：${now}`);
+  if (!Number.isFinite(lastAttemptTime)) return true;
+  return nowTime - lastAttemptTime >= Number(match[1]) * 3_600_000;
+}
+
+export async function runIngestion({ trigger = "manual", logger = console, fetchOptions = {} } = {}) {
   const sources = await loadSourceCatalog();
+  for (const source of sources) isSourceDue(source, { trigger: "manual" });
   const analysisProvider = resolveAnalysisProvider();
   const database = openDatabase();
   const startedAt = new Date().toISOString();
   const preferredAnalysisMode = analysisProvider;
   upsertSourceCatalog(database, sources);
+  const sourceHealth = new Map(getSourceHealth(database).map((source) => [source.source_id, source]));
+  const dueSources = sources.filter((source) => isSourceDue(source, {
+    trigger,
+    lastAttemptAt: sourceHealth.get(source.id)?.last_attempt_at || null,
+    now: startedAt,
+  }));
+  const cadenceSkippedSources = sources.length - dueSources.length;
   const runId = beginRun(database, trigger, startedAt, preferredAnalysisMode);
   let runFinished = false;
   let persistedResult = null;
 
   try {
     const discoveryResults = await mapLimit(
-      sources,
+      dueSources,
       Number(process.env.RADAR_SOURCE_CONCURRENCY || 4),
       async (source) => {
         const attemptedAt = new Date().toISOString();
         try {
-          const items = await discoverSourceItems(source);
+          const items = await discoverSourceItems(source, fetchOptions);
           logger.info?.(`[source:${source.id}] discovered=${items.length}`);
           return { source, attemptedAt, items, error: null };
         } catch (error) {
@@ -95,6 +161,8 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
     const candidates = [];
     let skippedCount = 0;
     let fetchedCount = 0;
+    const publishThreshold = Number(process.env.RADAR_RELEVANCE_THRESHOLD || 5);
+    const discoveryThreshold = Number(process.env.RADAR_DISCOVERY_RELEVANCE_THRESHOLD || Math.min(3, publishThreshold));
     for (const result of discoveryResults) {
       fetchedCount += result.items.length;
       for (const rawItem of result.items) {
@@ -102,7 +170,7 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
         const relevanceScore = scoreRelevance(rawItem, result.source);
         if (
           !rawItem.url || seen.has(rawItem.url) || articleExists(database, rawItem.url) ||
-          !withinAgeLimit(publishedAt) || relevanceScore < Number(process.env.RADAR_RELEVANCE_THRESHOLD || 5)
+          !withinAgeLimit(publishedAt)
         ) {
           skippedCount += 1;
           continue;
@@ -116,15 +184,33 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
           sourceName: result.source.name,
           sourceClass: result.source.class,
           independentGroup: result.source.independentGroup,
+          sourceLayer: result.source.layer,
+          sourceLanguage: result.source.language,
+          sourceFocus: result.source.focus,
+          alwaysRelevant: result.source.alwaysRelevant === true,
+          engagementCount: Number(rawItem.engagementCount || 0),
         });
       }
     }
 
     candidates.sort((left, right) => right.relevanceScore - left.relevanceScore || new Date(right.publishedAt || 0) - new Date(left.publishedAt || 0));
-    const selected = selectFairly(candidates, Number(process.env.RADAR_MAX_NEW_ITEMS || 48));
+    const publishLimit = Number(process.env.RADAR_MAX_NEW_ITEMS || 48);
+    const selected = selectFairly(candidates, publishLimit);
     skippedCount += Math.max(0, candidates.length - selected.length);
-    const enriched = await mapLimit(selected, Number(process.env.RADAR_FETCH_CONCURRENCY || 4), enrichItem);
-    const maxAIItems = Number(process.env.RADAR_MAX_AI_ITEMS || 16);
+    const enrichedItems = await mapLimit(
+      selected,
+      Number(process.env.RADAR_FETCH_CONCURRENCY || 4),
+      (item) => enrichItem(item, fetchOptions),
+    );
+    const enriched = enrichedItems.flatMap((item) => {
+      const relevanceScore = scoreRelevance(item, { alwaysRelevant: item.alwaysRelevant });
+      if (relevanceScore < discoveryThreshold) {
+        skippedCount += 1;
+        return [];
+      }
+      return [{ ...item, relevanceScore }];
+    });
+    const maxAIItems = aiItemLimit(publishLimit);
     let analysisFallbackCount = 0;
     let analysisRepairCount = 0;
     const analyzed = await mapLimit(
@@ -144,34 +230,51 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
       },
     );
 
+    const ranked = analyzed.map(({ item, analysis }) => ({
+      item,
+      analysis,
+      relevanceScore: finalRelevanceScore(item.relevanceScore, analysis),
+    }));
+    let retiredCount = 0;
+    for (const { item, analysis, relevanceScore } of ranked) {
+      if (analysis.publishDecision === "reject" && retireWatchedArticle(database, persistedArticle(item, analysis, relevanceScore))) {
+        retiredCount += 1;
+      }
+    }
+    const isWatchedConceptCandidate = ({ analysis, relevanceScore }) => {
+      return analysis.publishDecision === "watch"
+        && relevanceScore >= discoveryThreshold
+        && Boolean(String(analysis.candidateConcept || "").trim());
+    };
+    const publishable = ranked.flatMap(({ item, analysis, relevanceScore }) => {
+      if (analysis.publishDecision !== "publish" || relevanceScore < publishThreshold) {
+        if (!isWatchedConceptCandidate({ analysis, relevanceScore })) skippedCount += 1;
+        return [];
+      }
+      return [{ item, analysis, relevanceScore }];
+    }).sort((left, right) => {
+      return right.relevanceScore - left.relevanceScore ||
+        Number(right.analysis.editorialScore || 0) - Number(left.analysis.editorialScore || 0) ||
+        Number(right.analysis.evidenceScore || 0) - Number(left.analysis.evidenceScore || 0) ||
+        new Date(right.item.publishedAt || 0) - new Date(left.item.publishedAt || 0);
+    }).slice(0, publishLimit);
+    const watchedConceptCandidates = ranked.filter(isWatchedConceptCandidate);
     const since = new Date(Date.now() - 21 * 86_400_000).toISOString();
     const clusterCandidates = getRecentClusterCandidates(database, since).map((row) => ({ ...row }));
     const acceptedBySource = new Map();
     const acceptedAnalysisModes = new Set();
     let acceptedCount = 0;
-    for (const { item, analysis } of analyzed) {
+    let watchedCount = 0;
+    for (const { item, analysis, relevanceScore } of [...publishable, ...watchedConceptCandidates]) {
+      const isPublished = analysis.publishDecision === "publish" && relevanceScore >= publishThreshold;
       const signalSlug = chooseSignalSlug(item, analysis, clusterCandidates);
-      const discoveredAt = new Date().toISOString();
-      const article = {
-        ...item,
-        originalTitle: item.title,
-        originalExcerpt: item.excerpt || "",
-        contentText: item.contentText || item.excerpt || "",
-        discoveredAt,
-        contentHash: contentHash(item.title, item.excerpt || "", item.contentText || ""),
-        signalSlug,
-        conceptSlug: analysis.conceptSlug,
-        title: analysis.title,
-        summary: analysis.summary,
-        implication: analysis.implication,
-        topic: analysis.topic,
-        stage: analysis.stage,
-        accent: analysis.accent,
-        tags: analysis.tags,
-        analysisMode: analysis.analysisMode,
-      };
+      const article = persistedArticle(item, analysis, relevanceScore, signalSlug);
       if (!insertArticle(database, article)) {
-        skippedCount += 1;
+        if (isPublished) skippedCount += 1;
+        continue;
+      }
+      if (!isPublished) {
+        watchedCount += 1;
         continue;
       }
       acceptedCount += 1;
@@ -183,6 +286,7 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
         original_title: item.title,
         tags_json: JSON.stringify(analysis.tags),
         independent_group: item.independentGroup,
+        event_key: analysis.eventKey,
       });
     }
 
@@ -196,13 +300,19 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
       });
     }
 
-    let status = failedSources === sources.length ? "failed" : failedSources || analysisFallbackCount ? "partial" : "success";
+    let status = dueSources.length > 0 && failedSources === dueSources.length
+      ? "failed"
+      : failedSources || analysisFallbackCount ? "partial" : "success";
     const analysisMode = acceptedAnalysisModes.size > 1
       ? "mixed"
       : acceptedAnalysisModes.values().next().value || "rules";
     const message = [
-      `${sources.length - failedSources}/${sources.length} sources succeeded`,
+      `${dueSources.length}/${sources.length} sources due`,
+      `${cadenceSkippedSources} cadence-skipped`,
+      `${dueSources.length - failedSources}/${dueSources.length} due sources succeeded`,
       `${acceptedCount} new articles`,
+      watchedCount ? `${watchedCount} watched candidates` : null,
+      retiredCount ? `${retiredCount} retired candidates` : null,
       analysisRepairCount ? `${analysisRepairCount} AI repairs` : null,
       analysisFallbackCount ? `${analysisFallbackCount} AI fallbacks` : null,
     ].filter(Boolean).join("; ");
@@ -211,6 +321,8 @@ export async function runIngestion({ trigger = "manual", logger = console } = {}
       status,
       fetchedCount,
       acceptedCount,
+      watchedCount,
+      retiredCount,
       skippedCount,
       errorCount: failedSources + analysisFallbackCount,
       analysisRepairCount,

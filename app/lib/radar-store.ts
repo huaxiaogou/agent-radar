@@ -39,6 +39,8 @@ export async function getRadarSnapshot(): Promise<RadarSnapshot> {
       relations: parsed.relations?.length ? parsed.relations : seedRadarSnapshot.relations,
       playbooks: parsed.playbooks?.length ? parsed.playbooks : seedRadarSnapshot.playbooks,
       digests: parsed.digests || [],
+      modelPulses: parsed.modelPulses || [],
+      candidateConcepts: parsed.candidateConcepts || [],
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return seedRadarSnapshot;
