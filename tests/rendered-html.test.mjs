@@ -432,6 +432,21 @@ test("model atlas compares coding, everyday capability and price with evidence i
   assert.match(mainText, /证据口径/);
   assert.ok($("time[datetime]").length >= 1, "模型数据应暴露机器可读的核验时间");
 
+  const landscape = $(".model-landscape-plot");
+  assert.equal(landscape.length, 1, "模型页必须提供能力—成本全景图");
+  assert.match(landscape.attr("aria-labelledby") || "", /model-landscape-title/);
+  const landscapeText = $(".model-landscape-figure").text().replace(/\s+/g, " ");
+  for (const term of ["输出价格", "对数刻度", "编程能力档", "日常能力档"]) assert.match(landscapeText, new RegExp(term));
+  assert.equal(landscape.find("[data-model-id]").length, 8, "全景图必须完整绘制八个当前模型");
+  assert.equal(landscape.find("[data-model-id][role='img'][aria-label]").length, 8, "每个模型点必须有完整的无障碍说明");
+  assert.deepEqual(
+    landscape.find("[data-model-id]").toArray().map((node) => $(node).attr("data-model-id")),
+    ["gpt-5-6-sol", "gpt-5-6-terra", "claude-fable-5", "claude-opus-5", "claude-sonnet-5", "gemini-3-6-flash", "deepseek-v4-pro", "deepseek-v4-flash"],
+  );
+  assert.equal($(".model-landscape-key span").length, 4, "厂商颜色图例必须覆盖四个当前厂商");
+  assert.equal(landscape.find("marker, [marker-end], [stroke-dasharray]").length, 0, "整体视图不得保留 DeepSeek 竞争范围虚线或箭头");
+  assert.doesNotMatch($(".model-landscape-figure").text(), /竞争范围|本站分析模型/, "全景图不能特殊突出 DeepSeek Flash");
+
   const comparison = $("table").first();
   assert.equal(comparison.length, 1, "可视化必须有精确表格作为无障碍兜底");
   assert.ok(comparison.find("caption").text().trim(), "模型对比表需要 caption");

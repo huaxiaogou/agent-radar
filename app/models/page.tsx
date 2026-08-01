@@ -36,16 +36,6 @@ function capabilityLabel(value: CapabilityBand) {
   return `${capabilityBandLabels[value]} · ${value}/5`;
 }
 
-function CapabilityMeter({ value, label }: { value: CapabilityBand; label: string }) {
-  return (
-    <div className="capability-meter" aria-label={`${label} ${value}/5，${capabilityBandLabels[value]}`}>
-      <span>{label}</span>
-      <div aria-hidden="true">{[1, 2, 3, 4, 5].map((band) => <i className={band <= value ? "is-filled" : ""} key={band} />)}</div>
-      <b>{value}/5</b>
-    </div>
-  );
-}
-
 function emptyPulse(modelId: string): ModelPulse {
   const empty = { total: 0, official: 0, practitioner: 0, community: 0 };
   return { modelId, windows: { days7: empty, days30: empty }, sources: [] };
@@ -61,6 +51,40 @@ function formattedTime(value: string | null) {
     minute: "2-digit",
     hour12: false,
   }).format(new Date(value));
+}
+
+const landscape = { left: 92, right: 936, top: 98, bottom: 472 };
+const outputPriceTicks = [0.25, 0.5, 1, 2, 5, 10, 20, 50];
+const outputPriceDomain = { min: 0.2, max: 64 };
+const providerLegend = [
+  { name: "OpenAI", className: "provider-openai" },
+  { name: "Anthropic", className: "provider-anthropic" },
+  { name: "Google", className: "provider-google" },
+  { name: "DeepSeek", className: "provider-deepseek" },
+] as const;
+const modelLabelOffsets: Record<string, { dx: number; dy: number; anchor: "start" | "middle" | "end" }> = {
+  "gpt-5-6-sol": { dx: 0, dy: 62, anchor: "middle" },
+  "gpt-5-6-terra": { dx: 13, dy: 31, anchor: "start" },
+  "claude-fable-5": { dx: -8, dy: -48, anchor: "end" },
+  "claude-opus-5": { dx: -18, dy: -20, anchor: "end" },
+  "claude-sonnet-5": { dx: 12, dy: 32, anchor: "start" },
+  "gemini-3-6-flash": { dx: -13, dy: -16, anchor: "end" },
+  "deepseek-v4-pro": { dx: 13, dy: -16, anchor: "start" },
+  "deepseek-v4-flash": { dx: 13, dy: -16, anchor: "start" },
+};
+
+function outputPriceX(value: number) {
+  const ratio = (Math.log(value) - Math.log(outputPriceDomain.min)) /
+    (Math.log(outputPriceDomain.max) - Math.log(outputPriceDomain.min));
+  return landscape.left + Math.max(0, Math.min(1, ratio)) * (landscape.right - landscape.left);
+}
+
+function codingBandY(value: CapabilityBand) {
+  return landscape.bottom - ((value - 1) / 4) * (landscape.bottom - landscape.top);
+}
+
+function everydayRadius(value: CapabilityBand) {
+  return 4.5 + value * 1.45;
 }
 
 export default async function ModelsPage() {
@@ -89,6 +113,14 @@ export default async function ModelsPage() {
     day: "2-digit",
   }).format(new Date(modelDataVerifiedAt));
   const pulseAt = snapshot.status.lastSuccessfulAt;
+  const plottedModels = displayModels.map((model) => ({
+    ...model,
+    x: outputPriceX(model.effectivePrice.output),
+    y: codingBandY(model.coding),
+    radius: everydayRadius(model.everyday),
+    providerClass: `provider-${model.provider.toLowerCase()}`,
+    label: modelLabelOffsets[model.id],
+  }));
 
   return (
     <AppShell active="models" status={snapshot.status}>
@@ -115,45 +147,69 @@ export default async function ModelsPage() {
       <section className="model-atlas-section" aria-labelledby="capability-map-title">
         <div className="section-heading model-section-heading">
           <div>
-            <span className="mono-label">01 / CAPABILITY TELEMETRY RAIL</span>
-            <h2 id="capability-map-title">全称能力轨道</h2>
+            <span className="mono-label">01 / COST × CODING LANDSCAPE</span>
+            <h2 id="capability-map-title">能力—成本全景</h2>
           </div>
-          <p>每个模型完整显示名称、两个能力档、输出价格和讨论脉冲；1–5 只是选型起点，不可跨厂商直接相减。</p>
+          <p>横轴是输出价格的对数刻度，纵轴是编程能力档，圆点大小表示日常能力档；所有模型使用同一口径，不突出某个厂商。</p>
         </div>
 
         <div className="model-atlas-layout">
-          <figure className="model-rail-figure" aria-label="模型完整名称、编程能力、日常能力、输出价格与社区讨论脉冲">
-            <div className="model-rail-head" aria-hidden="true">
-              <span>模型</span><span>能力轨道</span><span>成本</span><span>讨论脉冲</span>
+          <figure className="model-landscape-figure">
+            <div className="model-landscape-key" aria-label="模型厂商图例">
+              <div>
+                {providerLegend.map((provider) => <span key={provider.name}><i className={provider.className} aria-hidden="true" />{provider.name}</span>)}
+              </div>
+              <p><i aria-hidden="true" />圆点越大，日常能力档越高</p>
             </div>
-            <div className="model-rails">
-              {displayModels.map((model) => (
-                <article className={`model-rail provider-${model.provider.toLowerCase()}${activeRadarModelId === model.id ? " is-current" : ""}`} key={model.id}>
-                  <header>
-                    <small translate="no">{model.provider}</small>
-                    <h3 translate="no">{model.name}</h3>
-                    {activeRadarModelId === model.id && <b>本站分析模型</b>}
-                  </header>
-                  <div className="model-capability-pair">
-                    <CapabilityMeter value={model.coding} label="编程" />
-                    <CapabilityMeter value={model.everyday} label="日常" />
-                  </div>
-                  <div className="model-rail-cost">
-                    <small>输出 / 百万 tokens</small>
-                    <b>{formatTokenPrice(model.effectivePrice.output)}</b>
-                    <span>输入 {formatTokenPrice(model.effectivePrice.input)}</span>
-                  </div>
-                  <div className="model-pulse-cell">
-                    <span><b>{model.pulse.windows.days7.total}</b><small>近 7 日</small></span>
-                    <span><b>{model.pulse.windows.days30.total}</b><small>近 30 日</small></span>
-                    <i aria-label={`30 日证据：官方 ${model.pulse.windows.days30.official}，实践者 ${model.pulse.windows.days30.practitioner}，社区 ${model.pulse.windows.days30.community}`}>
-                      官 {model.pulse.windows.days30.official} · 实 {model.pulse.windows.days30.practitioner} · 社 {model.pulse.windows.days30.community}
-                    </i>
-                  </div>
-                </article>
-              ))}
+            <p className="model-landscape-scroll-cue"><span aria-hidden="true">↔</span> 横向滑动查看完整模型分布</p>
+            <div className="model-landscape-scroll" tabIndex={0} aria-label="模型能力成本全景图，可横向滚动">
+              <svg className="model-landscape-plot" viewBox="0 0 1000 548" role="img" aria-labelledby="model-landscape-title model-landscape-description">
+                <title id="model-landscape-title">主流模型能力—成本全景</title>
+                <desc id="model-landscape-description">横轴为每百万输出 tokens 的美元价格，对数刻度；纵轴为编程能力一至五档；圆点大小为日常能力档；颜色区分厂商。</desc>
+                <g className="model-chart-grid" aria-hidden="true">
+                  {([1, 2, 3, 4, 5] as CapabilityBand[]).map((band) => {
+                    const y = codingBandY(band);
+                    return <g key={band}><line x1={landscape.left} x2={landscape.right} y1={y} y2={y} /><text x={landscape.left - 14} y={y + 4} textAnchor="end">{band} · {capabilityBandLabels[band]}</text></g>;
+                  })}
+                  {outputPriceTicks.map((price) => {
+                    const x = outputPriceX(price);
+                    return <g key={price}><line x1={x} x2={x} y1={landscape.top} y2={landscape.bottom} /><text x={x} y={landscape.bottom + 28} textAnchor="middle">${price}</text></g>;
+                  })}
+                </g>
+                <g className="model-chart-axes" aria-hidden="true">
+                  <line x1={landscape.left} x2={landscape.left} y1={landscape.top} y2={landscape.bottom} />
+                  <line x1={landscape.left} x2={landscape.right} y1={landscape.bottom} y2={landscape.bottom} />
+                  <text x={(landscape.left + landscape.right) / 2} y="532" textAnchor="middle">输出价格 / 百万 tokens（USD，对数刻度）</text>
+                  <text transform="rotate(-90 22 285)" x="22" y="285" textAnchor="middle">编程能力档</text>
+                </g>
+                <g className="model-provider-lines" aria-hidden="true">
+                  {providerLegend.map((provider) => {
+                    const points = plottedModels.filter((model) => model.provider === provider.name).sort((left, right) => left.x - right.x);
+                    if (points.length < 2) return null;
+                    return <polyline className={provider.className} points={points.map((point) => `${point.x},${point.y}`).join(" ")} key={provider.name} />;
+                  })}
+                </g>
+                <g className="model-market-points">
+                  {plottedModels.map((model) => (
+                    <g
+                      className={`model-market-point ${model.providerClass}`}
+                      data-model-id={model.id}
+                      data-provider={model.provider}
+                      role="img"
+                      aria-label={`${model.name}：编程 ${model.coding}/5，日常 ${model.everyday}/5，输出 ${formatTokenPrice(model.effectivePrice.output)} / 百万 tokens`}
+                      key={model.id}
+                    >
+                      <circle cx={model.x} cy={model.y} r={model.radius} />
+                      <text x={model.x + model.label.dx} y={model.y + model.label.dy} textAnchor={model.label.anchor}>
+                        <tspan className="model-market-name" lang="en">{model.name}</tspan>
+                        <tspan className="model-market-meta" x={model.x + model.label.dx} dy="15">编 {model.coding}/5 · 日 {model.everyday}/5 · {formatTokenPrice(model.effectivePrice.output)}</tspan>
+                      </text>
+                    </g>
+                  ))}
+                </g>
+              </svg>
             </div>
-            <figcaption>左侧是带核验日期的编辑档位；右侧是四小时采集生成的讨论计数。脉冲只说明被讨论，不说明更强。</figcaption>
+            <figcaption>细实线仅连接同厂商的当前产品线，不表示演进顺序。这里使用可核验的 API 输出价格，不虚构统一 token 预算下的“单任务成本”；精确输入价、上下文和近期讨论见下表。</figcaption>
           </figure>
 
           <aside className="evidence-boundary" aria-labelledby="evidence-boundary-title">

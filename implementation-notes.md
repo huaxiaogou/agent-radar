@@ -263,3 +263,27 @@
 - `/discussions` exposes community discovery with original links; `/models` uses full names and separates dated capability/price facts from timer-updated 7/30-day discussion pulses.
 - Real no-key ingestion probes against the expanded registry completed after connector repair. The final pinned-DNS transport probe reported 39/39 enabled sources healthy, 453 fetched items, eight accepted articles and zero source errors; it also correctly excluded retired source records from status.
 - Remaining external validation is production-host network health and the configured DeepSeek account's real batch latency/quota; local tests cannot prove either.
+
+## Model landscape reference session
+
+### Deviations
+
+- The reference chart uses a weighted per-task cost and a proprietary intelligence index. Radar has neither a shared token budget nor comparable benchmark runs, so the implementation preserves the visual semantics but uses verified API output price on the log axis and the existing dated coding capability band on the vertical axis. Everyday capability is encoded by point size and written into every label.
+- The reference highlights DeepSeek Flash with a dashed competition rectangle and arrow. Both are intentionally omitted; every provider uses the same point, label and portfolio-line grammar.
+
+### Discovered edge cases
+
+- Four current models share the highest coding band. Their plotted points remain on the exact band while label offsets are staggered, so readability does not falsify the coordinate.
+- A phone viewport cannot preserve full model names and a meaningful log axis at once. The figure uses a keyboard-focusable horizontal scroll region with an explicit mobile cue; the exact comparison table remains the accessible numerical fallback.
+
+### Questions for review
+
+- None. Automatically estimating cost per task remains prohibited until one shared harness, token budget and repeatable task set exist for every model.
+
+### Session summary
+
+- Deviations count: 2.
+- Most likely revisit: replace editorial capability bands only after a reproducible first-party task suite exists.
+- Edge cases found: 2; shared top-band labels and mobile chart width are handled.
+- Questions awaiting review: 0.
+- Next session should read this section and `app/models/page.tsx` before changing chart axes or introducing a derived score.
