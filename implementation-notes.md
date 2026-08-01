@@ -1,5 +1,29 @@
 # Implementation notes
 
+## Concept graph geometry session
+
+### Deviations
+
+- The original graph used independently positioned HTML nodes and CSS line segments. The fix moves the whole visualization into one responsive SVG coordinate system and derives its nodes and edges from the same runtime relation data used by the accessible list.
+
+### Discovered edge cases
+
+- Percentage-based line origins cannot stay attached to fixed-size ellipses as the container width changes. Edge endpoints are now calculated from node centers and clipped to the ellipse equation.
+- Production snapshots can contain more relations than the original hard-coded six-node/five-edge illustration. Node and edge counts, layout columns, and canvas dimensions now derive from every current relation.
+- Small screens previously hid every relationship line. The SVG keeps the complete graph and uses horizontal scrolling so the accessible list and the visual map remain consistent.
+
+### Questions for review
+
+- None. This is a read-only rendering change; ingestion, snapshots, relation semantics, and the relationship list are unchanged.
+
+### Session summary
+
+- Deviations count: 1.
+- Most likely revisit: replace the deterministic layered layout with collision-aware routing only when relation density produces overlapping labels, not merely when node count grows.
+- Edge cases found: 3; responsive attachment, snapshot cardinality drift, and mobile edge visibility are covered.
+- Questions awaiting review: 0.
+- Next session should read this section, `app/graph/geometry.js`, and `tests/graph-geometry.test.mjs` before changing graph layout or routing.
+
 ## DeepSeek production enum repair session
 
 ### Deviations

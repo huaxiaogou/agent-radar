@@ -90,6 +90,16 @@ test("primary routes render with a heading and skip link", async () => {
   }
 });
 
+test("concept graph renders relations in one responsive SVG coordinate system", async () => {
+  const response = await render("/graph");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /class="concept-graph"/);
+  assert.match(html, /data-graph-node=/);
+  assert.match(html, /data-graph-edge=/);
+  assert.doesNotMatch(html, /graph-line line-a|node-manager/);
+});
+
 test("starter preview is removed and project assets are present", async () => {
   const [packageJson, layout] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
