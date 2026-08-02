@@ -398,3 +398,37 @@
 - Edge cases found: 3; under-specified first-pass language, wrong-field retry guidance and Han-ratio gaming are covered.
 - Questions awaiting review: 0.
 - Next session should read this section and `retryCorrection` in `radar/analyze.mjs` before changing editorial prompts or validation feedback.
+
+## Mainland ingestion resilience session
+
+### Deviations
+
+- A universal public proxy was considered as the fastest way to recover blocked community feeds. It was rejected because it would create an unowned availability and evidence-integrity dependency; the implementation uses verified official/same-community fallback endpoints plus an opt-in operator-owned HTTPS relay.
+- A stale `running` repair inside `openDatabase()` would have been mechanically simpler. It was rejected because the web process also opens SQLite while ingestion may legitimately be active; reconciliation now requires the current module-held exclusive task-lock capability and runs before a new ingestion row is created.
+- The initial red test assumed Bluesky `public.api.bsky.app` was a usable `searchPosts` fallback. A real endpoint probe returned HTTP 403 while the existing `api.bsky.app` endpoint returned 200, so the known-broken fallback was removed and Bluesky remains eligible for the operator-owned relay instead.
+
+### Discovered edge cases
+
+- A fallback or relay success is availability, not primary health. It updates `last_success_at` but persists `last_status=degraded`, marks the run partial and is counted separately from direct health.
+- Fetch errors often expose the actionable network code only at `error.cause.code`. Structured diagnostics walk the bounded cause chain while removing URL query strings and known source/relay query values.
+- A relay response may contain relative article links. Those links must resolve against the original source endpoint rather than the relay transport URL.
+- Endpoint overrides may change parser kind, parser, URL filters and the parser's discovery homepage, but cannot change the catalog source identity, evidence layer or public homepage.
+- An invalid relay template must fail before any relay request: HTTPS is mandatory, URL credentials are forbidden and exactly one `{url}` placeholder is required.
+- More than one abandoned `running` row can survive repeated process interruption. Reconciliation updates every unfinished running row in one immediate transaction and is idempotent on later starts.
+- HTML search pages can link back to their own filter URLs. The Google fallback whitelist excludes `/search/` and query-only matches so discovery cannot publish the search UI as an Antigravity article.
+- A WAF challenge or parser drift may return HTTP 200 while producing zero source items. When fallback or relay is available, `EMPTY_RESULT` is recorded and the next endpoint is attempted; empty fallback and relay responses never count as availability.
+- DNS lookup failures previously replaced the resolver exception and lost codes such as `EAI_AGAIN`. The public-target guard now preserves the bounded cause chain for diagnostics.
+- A relay template can place `{url}` in a fragment that is never sent to the relay server. Fragment templates are rejected before any relay request.
+- A degraded source may outlive its cadence window if scheduling stops. Once stale, it becomes delayed and leaves both degraded and available counts instead of remaining permanently available.
+
+### Questions for review
+
+- Production mainland reachability still depends on the server ISP and any configured operator relay. Built-in fallbacks reduce single-host failures but cannot guarantee that every foreign domain is reachable from every mainland route.
+
+### Session summary
+
+- Deviations count: 3.
+- Most likely revisit: add per-source relay routing only if one operator relay should intentionally cover a strict subset of sources.
+- Edge cases found: 11; degraded semantics, nested network and DNS codes, relay-relative links, bounded endpoint overrides, relay template validation, multi-row stale-run recovery, search-page self-links, empty successful responses and stale degraded health are covered.
+- Questions awaiting review: 1 production-network validation item.
+- Next session should read this section, `radar/fetch.mjs`, `radar/catalog.mjs`, `radar/pipeline.mjs` and `scripts/task-lock.mjs` before changing source transport or run lifecycle.

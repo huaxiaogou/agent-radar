@@ -338,6 +338,45 @@ export async function acquireTaskLock() {
   throw new Error("任务锁竞争过于频繁，未能安全获得 owner");
 }
 
+async function assertCurrentLockOwner(lockHandle) {
+  if (!lockHandle || lockHandle !== heldLock || lockHandle.pid !== process.pid) {
+    throw new Error("只有当前进程的独占任务锁 owner 才能收敛遗留 run");
+  }
+  const owner = await readOwner(lockHandle.lockFile);
+  if (
+    Number(owner?.pid) !== lockHandle.pid ||
+    owner?.ownerToken !== lockHandle.ownerToken ||
+    owner?.processIdentity !== lockHandle.processIdentity
+  ) {
+    throw new Error("任务锁 owner 身份已变化，拒绝收敛遗留 run");
+  }
+}
+
+export async function reconcileAbandonedRuns({ database, lockHandle, finishedAt = new Date().toISOString() } = {}) {
+  if (!database || typeof database.prepare !== "function") throw new Error("收敛遗留 run 缺少数据库连接");
+  if (!Number.isFinite(new Date(finishedAt).getTime())) throw new Error("收敛遗留 run 的 finishedAt 无效");
+  await assertCurrentLockOwner(lockHandle);
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    const result = database.prepare(`
+      UPDATE runs SET
+        finished_at = COALESCE(finished_at, ?),
+        status = 'failed',
+        error_count = CASE WHEN error_count < 1 THEN 1 ELSE error_count END,
+        message = CASE
+          WHEN message IS NULL OR message = '' THEN '遗留 running 任务异常终止：新任务已在独占锁下自动收敛'
+          ELSE message || '; 遗留 running 任务异常终止：新任务已在独占锁下自动收敛'
+        END
+      WHERE status = 'running'
+    `).run(finishedAt);
+    database.exec("COMMIT");
+    return { reconciledCount: Number(result.changes || 0), finishedAt };
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export async function releaseTaskLock(handle = heldLock) {
   if (!handle || handle.pid !== process.pid) return false;
   const owner = await readOwner(handle.lockFile);

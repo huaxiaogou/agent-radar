@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import path from "node:path";
-import { acquireTaskLock, projectRoot, releaseTaskLock } from "./task-lock.mjs";
+import { acquireTaskLock, projectRoot, reconcileAbandonedRuns, releaseTaskLock } from "./task-lock.mjs";
 
 try {
   process.loadEnvFile(path.join(projectRoot, ".env.production"));
@@ -14,11 +14,21 @@ function triggerFromArgs() {
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : "manual";
 }
 
-await acquireTaskLock();
+const lockHandle = await acquireTaskLock();
 try {
+  const { openDatabase } = await import("../radar/database.mjs");
+  const database = openDatabase();
+  try {
+    const reconciliation = await reconcileAbandonedRuns({ database, lockHandle });
+    if (reconciliation.reconciledCount) {
+      console.warn(`[runs] reconciled-abandoned=${reconciliation.reconciledCount}`);
+    }
+  } finally {
+    database.close();
+  }
   const { runIngestion } = await import("../radar/pipeline.mjs");
   const result = await runIngestion({ trigger: triggerFromArgs() });
   console.log(JSON.stringify({ service: "agent-radar", task: "ingest", ...result }, null, 2));
 } finally {
-  await releaseTaskLock();
+  await releaseTaskLock(lockHandle);
 }

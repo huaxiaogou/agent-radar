@@ -158,6 +158,27 @@ npm run ai:check
 
 systemd 每四小时唤醒一次采集服务；每个来源再按 `config/sources.json` 的 4h/8h/12h/24h cadence 判断是否到期。手工执行 `npm run ingest` 会忽略 cadence 并立即扫描全部启用来源。
 
+来源按 `primary → catalog fallbacks → operator relay` 严格串行尝试。内置备用端点只使用同一组织的官方入口或同一社区自己的域名：Claude Code 与 Hugging Face 使用其官方 GitHub Atom，Google Antigravity 使用 Google Developers Blog 搜索入口，V2EX 使用 `global.v2ex.com`。Bluesky 的 `searchPosts` 在 `public.api` host 上实测返回 403，Reddit 也没有等价官方镜像，因此两者不会登记已知不可用或不可控的公共备用入口，需要时由 operator relay 承接。
+
+中国大陆服务器建议在 `.env.production` 使用：
+
+```dotenv
+RADAR_SOURCE_CONCURRENCY=2
+RADAR_FETCH_TIMEOUT_MS=30000
+```
+
+如果自有海外或企业出口 relay 可用，可额外配置：
+
+```dotenv
+RADAR_FETCH_RELAY_TEMPLATE=https://relay.example/fetch?target={url}&token=仅保存在服务器的令牌
+```
+
+relay 必须使用 HTTPS、不能在 URL authority 中携带用户名/密码，并且模板必须恰好包含一个 `{url}`。它只会在所有直接端点失败后启用，程序会编码目标 URL；relay 需要原样转发响应 body、HTTP 状态和 `Content-Type`。不要使用不可控的公共代理。采集日志只记录已脱敏的 host/path、底层错误码和 HTTP 状态，不打印来源 query、relay query 或 URL 凭据。
+
+来源状态区分三种口径：`healthySourceCount` 只统计 primary 直连正常，`degradedSourceCount` 单列备用端点或 relay 可用，`availableSourceCount` 是两者之和。备用成功仍把本轮标为 `partial`，`/sources` 显示“降级”而不是“正常”，同时更新该来源的最后成功时间并保留主端点失败诊断。
+
+采集进程拿到独占任务锁后、创建新 run 之前，会把此前因进程中断而遗留的 `running` 记录幂等收敛为 `failed`。普通网站进程仅打开 SQLite 时不会执行该修复，真实运行中的任务也不会被误判。
+
 网站只读取最后一份完整快照。所有来源同时失败、进程中断或新快照写入失败时，旧快照保持不变。
 
 常用运维命令：

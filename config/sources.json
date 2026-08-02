@@ -64,6 +64,12 @@
     "independentGroup": "anthropic",
     "maxItems": 16,
     "parser": "claude-changelog",
+    "fallbacks": [
+      {
+        "url": "https://github.com/anthropics/claude-code/releases.atom",
+        "kind": "feed"
+      }
+    ],
     "alwaysRelevant": true,
     "enabled": true
   },
@@ -268,6 +274,14 @@
     "independentGroup": "google",
     "maxItems": 12,
     "includeUrlPatterns": ["^https://www\\.antigravity\\.google/blog/.+"],
+    "fallbacks": [
+      {
+        "url": "https://developers.googleblog.com/search/?query=antigravity",
+        "kind": "html",
+        "discoveryHomepage": "https://developers.googleblog.com/",
+        "includeUrlPatterns": ["^https://developers\\.googleblog\\.com/(?!search/)(?:en/)?[^?]*antigravity[^?]*/?$"]
+      }
+    ],
     "alwaysRelevant": true,
     "enabled": true
   },
@@ -437,6 +451,12 @@
     "focus": "中文 AI Coding · Agent 工具与实践讨论",
     "independentGroup": "v2ex",
     "maxItems": 16,
+    "fallbacks": [
+      {
+        "url": "https://global.v2ex.com/feed/programmer.xml",
+        "kind": "feed"
+      }
+    ],
     "enabled": true
   },
   {
@@ -453,6 +473,12 @@
     "focus": "中文 AI 产品 · Agent 工具 · 开发者讨论",
     "independentGroup": "v2ex",
     "maxItems": 16,
+    "fallbacks": [
+      {
+        "url": "https://global.v2ex.com/feed/tech.xml",
+        "kind": "feed"
+      }
+    ],
     "enabled": true
   },
   {
@@ -569,6 +595,12 @@
     "focus": "Agents · Tool use · Open-source AI engineering",
     "independentGroup": "hugging-face",
     "maxItems": 14,
+    "fallbacks": [
+      {
+        "url": "https://github.com/huggingface/blog/commits/main.atom",
+        "kind": "feed"
+      }
+    ],
     "enabled": true
   },
   {

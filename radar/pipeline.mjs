@@ -1,4 +1,4 @@
-import { contentHash, enrichItem, discoverSourceItems } from "./fetch.mjs";
+import { contentHash, enrichItem, discoverSourceItemsWithDiagnostics } from "./fetch.mjs";
 import { analyzeItem, chooseSignalSlug, resolveAnalysisProvider, scoreRelevance } from "./analyze.mjs";
 import {
   articleExists,
@@ -137,13 +137,24 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
       async (source) => {
         const attemptedAt = new Date().toISOString();
         try {
-          const items = await discoverSourceItems(source, fetchOptions);
-          logger.info?.(`[source:${source.id}] discovered=${items.length}`);
-          return { source, attemptedAt, items, error: null };
+          const discovery = await discoverSourceItemsWithDiagnostics(source, fetchOptions);
+          const diagnostic = discovery.diagnostics.map((entry) => (
+            `${entry.role}[${entry.index}] ${entry.endpoint} [${entry.code}] ${entry.message}`
+          )).join("; ") || null;
+          const endpoint = `${discovery.endpoint.role}[${discovery.endpoint.index}] ${discovery.endpoint.url}`;
+          logger.info?.(`[source:${source.id}] discovered=${discovery.items.length} status=${discovery.status} endpoint=${endpoint}`);
+          if (diagnostic) logger.warn?.(`[source:${source.id}] degraded diagnostics=${diagnostic}`);
+          return {
+            source,
+            attemptedAt,
+            items: discovery.items,
+            status: discovery.status,
+            error: diagnostic,
+          };
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           logger.error?.(`[source:${source.id}] ${message}`);
-          return { source, attemptedAt, items: [], error: message };
+          return { source, attemptedAt, items: [], status: "error", error: message };
         }
       },
     );
@@ -277,11 +288,12 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
       });
     }
 
-    const failedSources = discoveryResults.filter((result) => result.error).length;
+    const failedSources = discoveryResults.filter((result) => result.status === "error").length;
+    const degradedSourceCount = discoveryResults.filter((result) => result.status === "degraded").length;
     for (const result of discoveryResults) {
       updateSourceHealth(database, result.source, {
         attemptedAt: result.attemptedAt,
-        status: result.error ? "error" : "success",
+        status: result.status,
         error: result.error,
         itemCount: acceptedBySource.get(result.source.id) || 0,
       });
@@ -289,7 +301,7 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
 
     let status = dueSources.length > 0 && failedSources === dueSources.length
       ? "failed"
-      : failedSources || analysisFallbackCount ? "partial" : "success";
+      : failedSources || degradedSourceCount || analysisFallbackCount ? "partial" : "success";
     const actualAnalysisModes = new Set(analyzed.map(({ analysis }) => analysis.analysisMode).filter(Boolean));
     const runAnalysisMode = actualAnalysisModes.size > 1
       ? "mixed"
@@ -297,7 +309,8 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
     const message = [
       `${dueSources.length}/${sources.length} sources due`,
       `${cadenceSkippedSources} cadence-skipped`,
-      `${dueSources.length - failedSources}/${dueSources.length} due sources succeeded`,
+      `${dueSources.length - failedSources}/${dueSources.length} due sources available`,
+      degradedSourceCount ? `${degradedSourceCount} degraded sources` : null,
       `${acceptedCount} new articles`,
       watchedCount ? `${watchedCount} watched candidates` : null,
       retiredCount ? `${retiredCount} retired candidates` : null,
@@ -312,7 +325,8 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
       watchedCount,
       retiredCount,
       skippedCount,
-      errorCount: failedSources + analysisFallbackCount,
+      errorCount: failedSources + degradedSourceCount + analysisFallbackCount,
+      degradedSourceCount,
       analysisRepairCount,
       configuredProvider: analysisProvider,
       runAnalysisMode,

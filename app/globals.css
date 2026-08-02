@@ -391,6 +391,7 @@ main { width: min(100%, 1600px); margin: 0 auto; padding: 0 clamp(22px, 4vw, 64p
 .source-status { display: flex; align-items: center; gap: 6px; }
 .source-status i { width: 7px; height: 7px; background: var(--supported); border-radius: 50%; }
 .source-status.status-异常 i { background: var(--conflict); }
+.source-status.status-降级 i { background: var(--signal); }
 .source-status.status-延迟 i { background: var(--signal); }
 .source-status.status-待首次采集 i { background: var(--muted); }
 .source-method { margin-top: 18px; padding: 20px; color: #eaf2f6; background: var(--sidebar); border-radius: 12px; }

@@ -249,7 +249,8 @@ function mapSources(rows) {
     const staleAfter = cadenceHours * 1.5 * 3_600_000 + 15 * 60_000;
     let status = "待首次采集";
     if (source.last_status === "error") status = "异常";
-    else if (source.last_status === "success" && now - lastSuccess > staleAfter) status = "延迟";
+    else if (["success", "degraded"].includes(source.last_status) && now - lastSuccess > staleAfter) status = "延迟";
+    else if (source.last_status === "degraded") status = "降级";
     else if (source.last_status === "success") status = "正常";
     return {
       id: source.source_id,
@@ -400,6 +401,8 @@ export async function buildSnapshot(database) {
       runAnalysisMode,
       sourceCount: sources.length,
       healthySourceCount: sources.filter((source) => source.status === "正常").length,
+      degradedSourceCount: sources.filter((source) => source.status === "降级").length,
+      availableSourceCount: sources.filter((source) => ["正常", "降级"].includes(source.status)).length,
       signalCount: signals.length,
       articleCount: getArticleCount(database),
       stale: !lastSuccessfulAt || Date.now() - dateValue(lastSuccessfulAt) > 12 * 3_600_000,

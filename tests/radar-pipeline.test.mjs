@@ -727,7 +727,7 @@ test("one source cannot use the publish limit to skip enrichment or LLM analysis
   }
 });
 
-test("zero-selection ingestion preserves configured provider and reports no actual article analysis", async () => {
+test("zero-selection ingestion preserves provider and reports empty resilient sources without AI analysis", async () => {
   const previousDataDirectory = process.env.RADAR_DATA_DIR;
   const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-zero-analysis-mode-"));
   const originalFetch = globalThis.fetch;
@@ -759,7 +759,12 @@ test("zero-selection ingestion preserves configured provider and reports no actu
     });
     const snapshot = JSON.parse(await readFile(getSnapshotPath(), "utf8"));
 
-    assert.equal(result.status, "success", "所有到期来源返回合法空结果时，本轮应成功完成而不是伪造失败");
+    assert.equal(result.status, "partial", "声明了 fallback 的非空列表来源全部为空时，必须暴露 EMPTY_RESULT 而不是伪装健康");
+    assert.ok(result.errorCount > 0, "空的高价值列表来源必须进入本轮错误计数");
+    assert.ok(
+      snapshot.sources.some((source) => source.status === "异常" && /EMPTY_RESULT/.test(source.lastError || "")),
+      "来源诊断必须保留 EMPTY_RESULT，便于区分无候选文章与容灾入口结构异常",
+    );
     assert.equal(result.fetchedCount, 0);
     assert.equal(result.acceptedCount, 0);
     assert.equal(deepSeekCalls, 0, "没有候选文章时不得产生 AI 调用");

@@ -218,7 +218,7 @@ export function updateSourceHealth(database, source, result) {
   database.prepare(`
     UPDATE source_health SET
       last_attempt_at = ?,
-      last_success_at = CASE WHEN ? = 'success' THEN ? ELSE last_success_at END,
+      last_success_at = CASE WHEN ? IN ('success', 'degraded') THEN ? ELSE last_success_at END,
       last_error = ?,
       last_status = ?,
       item_count = item_count + ?

@@ -137,8 +137,8 @@ async function resolvePublicTarget(input, resolveHostname) {
   let addresses;
   try {
     addresses = await resolveHostname(url.hostname);
-  } catch {
-    throw new Error(`抓取目标 DNS 解析失败：${url.hostname}`);
+  } catch (error) {
+    throw new Error(`抓取目标 DNS 解析失败：${url.hostname}`, { cause: error });
   }
   const normalizedAddresses = Array.isArray(addresses) ? addresses.map((entry) => {
     const address = String(entry?.address || entry || "").replace(/^\[|\]$/g, "").split("%")[0];
@@ -305,6 +305,95 @@ async function fetchText(url, attempts = 2, fetchOptions = {}) {
     }
   }
   throw lastError;
+}
+
+function endpointSource(source, endpoint) {
+  const sameKind = endpoint.kind === source.kind;
+  return {
+    ...source,
+    url: endpoint.url,
+    kind: endpoint.kind,
+    homepage: endpoint.discoveryHomepage || source.homepage,
+    parser: endpoint.parser ?? (sameKind ? source.parser : undefined),
+    includeUrlPatterns: endpoint.includeUrlPatterns ?? (sameKind ? source.includeUrlPatterns : undefined),
+  };
+}
+
+function safeEndpointLabel(value) {
+  try {
+    const url = new URL(value);
+    return `${url.hostname}${url.port ? `:${url.port}` : ""}${url.pathname}`;
+  } catch {
+    return "invalid-endpoint";
+  }
+}
+
+function nestedErrorCode(error) {
+  let current = error;
+  for (let depth = 0; current && depth < 6; depth += 1) {
+    const code = typeof current.code === "string" || typeof current.code === "number"
+      ? String(current.code)
+      : null;
+    if (code) return code;
+    current = current.cause;
+  }
+  const http = String(error?.message || "").match(/\bHTTP\s+(\d{3})\b/i);
+  return http ? `HTTP ${http[1]}` : "FETCH_ERROR";
+}
+
+function secretValuesFromUrl(value) {
+  try {
+    const url = new URL(value.replaceAll("{url}", "https://placeholder.invalid/"));
+    const values = [...url.searchParams.values()].filter((item) => item && item !== "https://placeholder.invalid/");
+    return [...new Set(values.flatMap((item) => [item, encodeURIComponent(item)]))];
+  } catch {
+    return [];
+  }
+}
+
+function safeErrorMessage(error, sensitiveValues = []) {
+  const code = nestedErrorCode(error);
+  if (/^HTTP \d{3}$/.test(code)) return code;
+  let message = String(error?.message || code || "fetch failed");
+  message = message.replace(/https:\/\/[^\s"'<>]+/gi, (value) => safeEndpointLabel(value));
+  for (const secret of sensitiveValues) {
+    if (secret) message = message.split(secret).join("[redacted]");
+  }
+  return message.slice(0, 500);
+}
+
+function endpointDiagnostic(endpoint, error, extraSensitiveValues = []) {
+  const sensitiveValues = [...secretValuesFromUrl(endpoint.url), ...extraSensitiveValues];
+  return {
+    role: endpoint.role,
+    index: endpoint.index,
+    endpoint: safeEndpointLabel(endpoint.url),
+    code: nestedErrorCode(error),
+    message: safeErrorMessage(error, sensitiveValues),
+  };
+}
+
+function configuredRelayTemplate() {
+  const template = String(process.env.RADAR_FETCH_RELAY_TEMPLATE || "").trim();
+  if (!template) return null;
+  if ((template.match(/\{url\}/g) || []).length !== 1) {
+    throw new Error("RADAR_FETCH_RELAY_TEMPLATE 必须且只能包含一个 {url} 占位符");
+  }
+  let relayUrl;
+  try {
+    relayUrl = new URL(template.replace("{url}", encodeURIComponent("https://placeholder.invalid/")));
+  } catch {
+    throw new Error("RADAR_FETCH_RELAY_TEMPLATE 不是有效 URL");
+  }
+  if (relayUrl.protocol !== "https:") throw new Error("RADAR_FETCH_RELAY_TEMPLATE 必须使用 HTTPS");
+  if (relayUrl.username || relayUrl.password) throw new Error("RADAR_FETCH_RELAY_TEMPLATE 不得包含 URL 凭据");
+  if (relayUrl.hash) throw new Error("RADAR_FETCH_RELAY_TEMPLATE 不得把 {url} 放在不会发送给服务器的 fragment 中");
+  if (isBlockedHostname(relayUrl.hostname)) throw new Error("RADAR_FETCH_RELAY_TEMPLATE 必须指向公网主机");
+  return template;
+}
+
+function relayUrlFor(template, targetUrl) {
+  return template.replace("{url}", encodeURIComponent(targetUrl));
 }
 
 function pickLink(value, baseUrl) {
@@ -522,12 +611,110 @@ function dateFromUrl(value) {
   return null;
 }
 
+function parseDiscoveryResponse(response, parsingSource, baseUrl) {
+  if (parsingSource.kind === "json") return parseJsonSource(response.body, parsingSource);
+  const looksLikeXml = /xml|rss|atom/i.test(response.contentType) || /^\s*<\?xml|^\s*<(rss|feed)\b/i.test(response.body);
+  if (parsingSource.kind === "feed" || looksLikeXml) return parseFeed(response.body, parsingSource);
+  return parseHtml(response.body, baseUrl, parsingSource);
+}
+
+function emptyDiscoveryError() {
+  const error = new Error("HTTP 响应成功但未解析出任何来源条目");
+  error.code = "EMPTY_RESULT";
+  return error;
+}
+
+export async function discoverSourceItemsWithDiagnostics(source, fetchOptions = {}) {
+  const directEndpoints = [
+    { url: source.url, kind: source.kind, role: "primary", index: 0 },
+    ...(source.fallbacks || []).map((fallback, index) => ({ ...fallback, role: "fallback", index: index + 1 })),
+  ];
+  const diagnostics = [];
+  const hasConfiguredRelay = Boolean(String(process.env.RADAR_FETCH_RELAY_TEMPLATE || "").trim());
+  const requireDirectItems = directEndpoints.length > 1 || hasConfiguredRelay;
+
+  for (const endpoint of directEndpoints) {
+    const parsingSource = endpointSource(source, endpoint);
+    try {
+      const response = await fetchText(endpoint.url, 2, fetchOptions);
+      const items = parseDiscoveryResponse(response, parsingSource, response.finalUrl);
+      if (!items.length && requireDirectItems) throw emptyDiscoveryError();
+      return {
+        sourceId: source.id,
+        status: endpoint.role === "primary" ? "success" : "degraded",
+        endpoint: {
+          role: endpoint.role,
+          index: endpoint.index,
+          url: safeEndpointLabel(endpoint.url),
+        },
+        diagnostics,
+        items,
+      };
+    } catch (error) {
+      diagnostics.push(endpointDiagnostic(endpoint, error));
+    }
+  }
+
+  let relayTemplate;
+  try {
+    relayTemplate = configuredRelayTemplate();
+  } catch (error) {
+    const directSummary = diagnostics.map((entry) => (
+      `${entry.role}[${entry.index}] ${entry.endpoint} [${entry.code}] ${entry.message}`
+    )).join("; ");
+    const aggregate = new Error(`所有直接抓取端点失败：${directSummary}; relay 配置无效：${safeErrorMessage(error)}`);
+    aggregate.diagnostics = diagnostics;
+    throw aggregate;
+  }
+  if (relayTemplate) {
+    const relaySecrets = secretValuesFromUrl(relayTemplate);
+    for (const endpoint of directEndpoints) {
+      const parsingSource = endpointSource(source, endpoint);
+      const relayEndpoint = {
+        role: "relay",
+        index: endpoint.index,
+        url: relayUrlFor(relayTemplate, endpoint.url),
+      };
+      try {
+        const response = await fetchText(relayEndpoint.url, 2, fetchOptions);
+        // Relay 的 finalUrl 属于传输层；相对文章链接必须相对原始来源端点解析。
+        const items = parseDiscoveryResponse(response, parsingSource, endpoint.url);
+        if (!items.length) throw emptyDiscoveryError();
+        return {
+          sourceId: source.id,
+          status: "degraded",
+          endpoint: {
+            role: "relay",
+            index: endpoint.index,
+            url: safeEndpointLabel(relayEndpoint.url),
+            target: safeEndpointLabel(endpoint.url),
+          },
+          diagnostics,
+          items,
+        };
+      } catch (error) {
+        diagnostics.push({
+          ...endpointDiagnostic(relayEndpoint, error, [
+            ...relaySecrets,
+            ...secretValuesFromUrl(endpoint.url),
+          ]),
+          target: safeEndpointLabel(endpoint.url),
+        });
+      }
+    }
+  }
+
+  const summary = diagnostics.map((entry) => {
+    const target = entry.target ? ` -> ${entry.target}` : "";
+    return `${entry.role}[${entry.index}] ${entry.endpoint}${target} [${entry.code}] ${entry.message}`;
+  }).join("; ");
+  const error = new Error(`所有抓取端点失败：${summary}`);
+  error.diagnostics = diagnostics;
+  throw error;
+}
+
 export async function discoverSourceItems(source, fetchOptions = {}) {
-  const { body, finalUrl, contentType } = await fetchText(source.url, 2, fetchOptions);
-  if (source.kind === "json") return parseJsonSource(body, source);
-  const looksLikeXml = /xml|rss|atom/i.test(contentType) || /^\s*<\?xml|^\s*<(rss|feed)\b/i.test(body);
-  if (source.kind === "feed" || looksLikeXml) return parseFeed(body, source);
-  return parseHtml(body, finalUrl, source);
+  return (await discoverSourceItemsWithDiagnostics(source, fetchOptions)).items;
 }
 
 export async function enrichItem(item, fetchOptions = {}) {

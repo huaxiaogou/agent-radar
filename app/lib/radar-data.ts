@@ -104,6 +104,8 @@ export type RadarStatus = {
   runAnalysisMode?: "none" | "rules" | "openai" | "deepseek" | "mixed";
   sourceCount: number;
   healthySourceCount: number;
+  degradedSourceCount: number;
+  availableSourceCount: number;
   signalCount: number;
   articleCount: number;
   stale: boolean;
@@ -404,6 +406,8 @@ export const seedRadarSnapshot: RadarSnapshot = {
     runAnalysisMode: "none",
     sourceCount: sources.length,
     healthySourceCount: sources.length,
+    degradedSourceCount: 0,
+    availableSourceCount: sources.length,
     signalCount: signals.length,
     articleCount: signals.reduce((total, signal) => total + signal.evidenceCount, 0),
     stale: true,

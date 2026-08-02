@@ -10,7 +10,7 @@ export default async function SourcesPage() {
     <AppShell active="sources" status={status}>
       <header className="page-hero">
         <div><span className="mono-label">MULTILINGUAL SOURCE REGISTRY / LAYERED EVIDENCE</span><h1>Sources</h1><p>全球官方、中文团队、独立实践者与中英文社区共同进入发现链路；来源层级决定证据职责，不直接决定结论真假。</p></div>
-        <div className="source-summary"><div><strong>{status.sourceCount}</strong><span>正式注册</span></div><div><strong>{status.healthySourceCount}</strong><span>健康来源</span></div><div><strong>{status.articleCount}</strong><span>累计文章</span></div></div>
+        <div className="source-summary"><div><strong>{status.sourceCount}</strong><span>正式注册</span></div><div><strong>{status.healthySourceCount}</strong><span>主链健康</span></div><div><strong>{status.degradedSourceCount}</strong><span>备用可用</span></div><div><strong>{status.availableSourceCount}</strong><span>当前可用</span></div></div>
       </header>
       <section className="source-table-wrap">
         <div className="source-table-head"><span>来源</span><span>证据层</span><span>优先级</span><span>节奏</span><span>关注范围</span><span>状态</span></div>
