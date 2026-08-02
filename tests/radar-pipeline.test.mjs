@@ -727,22 +727,30 @@ test("one source cannot use the publish limit to skip enrichment or LLM analysis
   }
 });
 
-test("zero-selection ingestion preserves provider and reports empty resilient sources without AI analysis", async () => {
+test("zero-selection ingestion preserves provider when healthy sources return only out-of-window items", async () => {
   const previousDataDirectory = process.env.RADAR_DATA_DIR;
   const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-zero-analysis-mode-"));
   const originalFetch = globalThis.fetch;
   const restoreEnvironment = configurePipelineTestEnvironment(isolatedDataDirectory);
-  const emptyFeed = "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>Empty Radar Feed</title></channel></rss>";
+  const staleFeed = "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>Historical Radar Feed</title><item><title>Historical agent engineering item</title><link>https://archive.example/historical-agent-item</link><description>Historical agent engineering evidence.</description><pubDate>Wed, 01 Jan 2020 00:00:00 GMT</pubDate></item></channel></rss>";
+  const { loadSourceCatalog } = await import("../radar/catalog.mjs");
+  const sources = await loadSourceCatalog();
+  const primaryKinds = new Map(sources.map((source) => [source.url, source]));
+  const staleJsonBody = (source) => {
+    const slug = source.id.replace(/[^a-z0-9-]/gi, "-");
+    if (source.parser === "github-issues") return [{ title: "Historical agent issue", html_url: `https://github.com/example/${slug}/issues/1`, body: "Historical agent issue.", created_at: "2020-01-01T00:00:00Z", comments: 1 }];
+    if (source.parser === "hacker-news") return { hits: [{ objectID: slug, title: "Historical agent discussion", story_text: "Historical agent discussion.", created_at: "2020-01-01T00:00:00Z", points: 1, num_comments: 1 }] };
+    if (source.parser === "bluesky-search") return { posts: [{ uri: `at://did:plc:radartest/app.bsky.feed.post/${slug}`, author: { handle: "radar-test.example.com" }, record: { text: "Historical agent discussion", createdAt: "2020-01-01T00:00:00Z" }, likeCount: 1 }] };
+    if (source.parser === "huggingface-daily-papers") return [{ paper: { id: "2001.00001", title: "Historical agent paper", summary: "Historical agent research." }, publishedAt: "2020-01-01T00:00:00Z" }];
+    if (source.parser === "dblp-publications") return { result: { hits: { hit: [{ info: { title: "Historical agent paper", url: `https://dblp.org/rec/journals/test/${slug}`, year: "2020" } }] } } };
+    throw new Error(`缺少 JSON 测试夹具：${source.parser}`);
+  };
   let deepSeekCalls = 0;
   const sourceFetchImpl = async (input) => {
     const url = String(input);
-    if (url.includes("hn.algolia.com")) {
-      return new Response(JSON.stringify({ hits: [] }), { status: 200, headers: { "content-type": "application/json" } });
-    }
-    if (url.includes("bsky.app") || url.includes("bluesky")) {
-      return new Response(JSON.stringify({ posts: [] }), { status: 200, headers: { "content-type": "application/json" } });
-    }
-    return new Response(emptyFeed, { status: 200, headers: { "content-type": "application/rss+xml" } });
+    const source = primaryKinds.get(url);
+    if (source?.kind === "json") return new Response(JSON.stringify(staleJsonBody(source)), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(staleFeed, { status: 200, headers: { "content-type": "application/rss+xml" } });
   };
   globalThis.fetch = async (input) => {
     deepSeekCalls += 1;
@@ -756,16 +764,13 @@ test("zero-selection ingestion preserves provider and reports empty resilient so
       trigger: "systemd",
       logger: { info() {}, warn() {}, error() {} },
       fetchOptions: trustedFetchOptions(sourceFetchImpl),
+      modelLandscapeFetcher: async () => [],
     });
     const snapshot = JSON.parse(await readFile(getSnapshotPath(), "utf8"));
 
-    assert.equal(result.status, "partial", "声明了 fallback 的非空列表来源全部为空时，必须暴露 EMPTY_RESULT 而不是伪装健康");
-    assert.ok(result.errorCount > 0, "空的高价值列表来源必须进入本轮错误计数");
-    assert.ok(
-      snapshot.sources.some((source) => source.status === "异常" && /EMPTY_RESULT/.test(source.lastError || "")),
-      "来源诊断必须保留 EMPTY_RESULT，便于区分无候选文章与容灾入口结构异常",
-    );
-    assert.equal(result.fetchedCount, 0);
+    assert.equal(result.status, "success", "来源成功返回可解析但已过期的条目时，本轮应成功且保持零候选");
+    assert.equal(result.errorCount, 0);
+    assert.ok(result.fetchedCount > 0, "零候选不等于上游空响应；fixture 应提供可解析的历史条目");
     assert.equal(result.acceptedCount, 0);
     assert.equal(deepSeekCalls, 0, "没有候选文章时不得产生 AI 调用");
     assert.equal(result.configuredProvider, "deepseek", "运行结果必须保留当前进程已解析的 provider");

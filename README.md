@@ -8,18 +8,18 @@ Agent Radar 是一个面向 AI Coding 与 Agent 工程实践的个人技术情�
 
 - `/today`：今日雷达与证据脉冲。
 - `/signals`：去重后的事件簇。
-- `/discussions`：统一展示中文与英文社区讨论、证据层级和原文；社区热度不等于事实或能力。
+- `/discussions`：合并已发布信号中的社区原文与 LLM 中文编辑成功的 watch 探索脉冲；每条保留原标题、原链和独立热度，始终标记为 community-only / 待溯源。
 - `/concepts`：可修订的正式概念索引，以及与正式目录隔离、保留原文的 LLM 待溯源概念候选。
 - `/graph`：概念关系图及无障碍文本替代。
 - `/models`：定时刷新的数十至上百模型“编程指数 × 单任务成本”全景、8 个重点模型的编辑核验对照，以及定时更新的 7/30 日讨论脉冲。
-- `/sources`：按官方、实践者/技术媒体、社区三层统一管理的多语言来源注册表。
+- `/sources`：同时展示 official/repository/practitioner/community/research 五类发现渠道与官方/实践者/社区三层 Evidence Layer，并区分配置、可用和已产出覆盖。
 - `/playbooks`、`/digests`、`/search`：方法库、周报和跨对象搜索。
 
-- 39 个公开免登录来源，覆盖全球与中文团队发布流、独立实践者、定向论文/技术媒体和中英文开发者社区；产品不按地域分榜。
+- 89 个启用的公开 HTTPS、免登录来源：27 个 official、26 个 repository、12 个 practitioner、13 个 community、11 个 research；同一组织或平台共享 `independentGroup`，不会用重复 feed 或同平台讨论伪造跨源验证。
 - SQLite 保存原始文章、来源健康度和每次任务结果；页面读取原子 JSON 快照。
 - 中英文宽召回、正文补全后二次相关性过滤、URL 去重、eventKey 事件聚类和概念归类。
 - DeepSeek 或 OpenAI 对所有通过正文补全与发现阈值的候选执行 publish/watch/reject 判断、相关性/新颖性/证据质量精排，并生成中文编辑标题、摘要和工程解读。原文保持原语言并保留跳转链接；规则分析只用于召回、分类修复和失败审计，不能成为公开卡片正文。`RADAR_MAX_NEW_ITEMS` 只限制最终发布，不会提前截断单一来源的正文补全或 LLM 分析。
-- systemd timer 每 4 小时采集，单一来源失败不会清空或阻断既有内容。
+- systemd timer 每小时唤醒一次；各来源按 1h/2h/4h/8h/12h/24h cadence 独立判断，单一来源失败不会清空或阻断既有内容。
 
 网站是公开只读访问，不要求登录。采集入口仅存在于服务器脚本和 systemd，不对公网暴露写接口。
 
@@ -147,19 +147,19 @@ npm run ai:check
 
 ## 自动采集原理
 
-`agent-radar-ingest.timer` 每四小时触发一次独立的 oneshot 服务。每次运行依次完成：
+`agent-radar-ingest.timer` 每小时触发一次独立的 oneshot 服务。每次运行依次完成：
 
 1. 从 `config/sources.json` 读取正式来源注册表。
 2. 并发抓取 RSS/Atom、公开 JSON API、GitHub Releases 和经过 URL 白名单约束的 HTML 页面；每次 HTTPS 请求都会拒绝内网/元数据地址和非安全重定向，并把已验证的 DNS 地址固定到实际 TLS 连接以阻断 DNS rebinding。
-3. 进行中英文宽召回，按来源轮询顺序对全部未见候选补全正文并做二次相关性检查；发布上限不会提前截断正文补全或 LLM 分析。官方、实践者与社区证据分别计数，社区重复不能自行升级为高置信。
+3. 进行中英文宽召回，按来源轮询顺序对全部未见候选补全正文并做二次相关性检查；固定工程词决定语义相关性。高互动且七天内、时间有效的社区/仓库候选只通过独立 exploration gate 进入 LLM 中文编辑，互动量不会进入模型输入；若它的规则相关性低于发现阈值，模型即使返回 publish 也会被确定性降为 watch，reject 则保持终态。发布上限不会提前截断正文补全或 LLM 分析，社区重复不能自行升级为高置信。
 4. 所有通过正文补全与发现阈值的候选都由 `RADAR_AI_PROVIDER` 指定的 DeepSeek Chat Completions 或 OpenAI Responses API 生成 publish/watch/reject 决策和中文编辑结果，再按 eventKey、版本和概念边界聚类。模型最终失败只记录任务错误且不落成公开文章，下轮扫描可继续重试；证据不足的新概念候选会隔离保存，等待后续溯源，不参与公开信号与正式概念排序。
 5. 在 `.data/agent-radar.sqlite` 中提交文章、来源健康度和任务记录。
 6. 按独立 cadence 刷新 Artificial Analysis 公开模型清单，解析编程指数、通用智能指数与每任务成本。只有结构完整且数量不低于安全阈值才原子替换 SQLite 中的上次模型快照；失败只记录错误。
 7. 生成 `.data/radar-snapshot.json` 临时文件，完整写入并同步后原子替换线上快照。
 
-systemd 每四小时唤醒一次采集服务；每个文章来源再按 `config/sources.json` 的 4h/8h/12h/24h cadence 判断是否到期，模型全景默认按 `RADAR_MODEL_LANDSCAPE_CADENCE_HOURS=24` 刷新。手工执行 `npm run ingest` 会忽略两类 cadence，立即扫描全部启用来源并刷新模型全景。
+systemd 每小时唤醒一次采集服务；每个文章来源再按 `config/sources.json` 的 1h/2h/4h/8h/12h/24h cadence 判断是否到期，模型全景默认按 `RADAR_MODEL_LANDSCAPE_CADENCE_HOURS=24` 刷新。手工执行 `npm run ingest` 会忽略两类 cadence，立即扫描全部启用来源并刷新模型全景。
 
-来源按 `primary → catalog fallbacks → operator relay` 严格串行尝试。内置备用端点只使用同一组织的官方入口或同一社区自己的域名：Claude Code 与 Hugging Face 使用其官方 GitHub Atom，Google Antigravity 使用 Google Developers Blog 搜索入口，V2EX 使用 `global.v2ex.com`。Bluesky 的 `searchPosts` 在 `public.api` host 上实测返回 403，Reddit 也没有等价官方镜像，因此两者不会登记已知不可用或不可控的公共备用入口，需要时由 operator relay 承接。
+来源按 `primary → catalog fallbacks → operator relay` 严格串行尝试。内置备用端点只使用同一组织的官方入口或同一社区自己的域名；所有 HTTP 200 但解析为 0 条的响应默认记录为 `EMPTY_RESULT` 并继续下一端点，只有显式 `allowEmpty` 的来源可把空结果视为成功。CrewAI、OpenHands 等目录页使用文章路径白名单，Microsoft、Vercel、LangChain 使用仍可用的官方 feed；原 OpenReview challenge 入口已停用并由 DBLP JSON 检索替代。
 
 中国大陆服务器建议在 `.env.production` 使用：
 
@@ -176,7 +176,11 @@ RADAR_FETCH_RELAY_TEMPLATE=https://relay.example/fetch?target={url}&token=仅保
 
 relay 必须使用 HTTPS、不能在 URL authority 中携带用户名/密码，并且模板必须恰好包含一个 `{url}`。它只会在所有直接端点失败后启用，程序会编码目标 URL；relay 需要原样转发响应 body、HTTP 状态和 `Content-Type`。不要使用不可控的公共代理。采集日志只记录已脱敏的 host/path、底层错误码和 HTTP 状态，不打印来源 query、relay query 或 URL 凭据。
 
+可选的 `GITHUB_TOKEN` 只用于 primary 直连且主机精确为 `api.github.com` 的请求，以提升公开 API 限额。程序不会把它发送到 GitHub 网页、catalog fallback、operator relay 或跨域重定向目标，也不会写入日志。Key 只保存在服务器 `.env.production`。
+
 来源状态区分三种口径：`healthySourceCount` 只统计 primary 直连正常，`degradedSourceCount` 单列备用端点或 relay 可用，`availableSourceCount` 是两者之和。备用成功仍把本轮标为 `partial`，`/sources` 显示“降级”而不是“正常”，同时更新该来源的最后成功时间并保留主端点失败诊断。
+
+`sourceCoverage` 按采集通道 family 与 Evidence Layer 分组报告 `configured / available / effective`，另以 `independentGroup` 去重展示独立来源组：configured 是启用目录数量，available 是本轮仍正常或降级可用的来源，effective 是当前公开 signals 或 discussion pulses 实际出现过的 source id。`/discussions` 的热度由互动量、新鲜度、讨论速度和独立来源广度组成，只用于发现排序；community-only 项无论多热都保持“待溯源”。
 
 采集进程拿到独占任务锁后、创建新 run 之前，会把此前因进程中断而遗留的 `running` 记录幂等收敛为 `failed`。普通网站进程仅打开 SQLite 时不会执行该修复，真实运行中的任务也不会被误判。
 

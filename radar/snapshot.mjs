@@ -7,6 +7,7 @@ import {
   getPublishedArticlesForBackfill,
   getRecentArticles,
   getRecentCandidateArticles,
+  getRecentCommunityWatchArticles,
   getSnapshotPath,
   getSourceHealth,
   openDatabase,
@@ -110,6 +111,37 @@ function verificationFor(sourceMix) {
   return { verificationState: "community-only", confidence: "待溯源" };
 }
 
+function boundedHeat(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(100, number));
+}
+
+export function computeSignalHeat(rows, { now = Date.now() } = {}) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const totalEngagement = safeRows.reduce((sum, row) => {
+    const value = Number(row?.engagement_count || row?.engagementCount || 0);
+    return sum + (Number.isFinite(value) && value > 0 ? value : 0);
+  }, 0);
+  const ages = safeRows.map((row) => Math.max(0, Number(now) - dateValue(eventAt(row)))).filter(Number.isFinite);
+  const freshestAge = ages.length ? Math.min(...ages) : Number.POSITIVE_INFINITY;
+  const recentCount = ages.filter((age) => age <= 24 * 3_600_000).length;
+  const independentGroups = new Set(safeRows.map((row) => row?.independent_group || row?.source_id).filter(Boolean));
+  const engagement = boundedHeat((Math.log1p(totalEngagement) / Math.log1p(10_000)) * 100);
+  const freshness = boundedHeat(Number.isFinite(freshestAge) ? 100 * Math.exp(-freshestAge / (72 * 3_600_000)) : 0);
+  const velocity = boundedHeat(recentCount ? 30 + Math.log2(recentCount + 1) * 22 : 0);
+  const participation = boundedHeat(independentGroups.size ? 18 + Math.log2(independentGroups.size + 1) * 24 : 0);
+  const score = boundedHeat(engagement * 0.35 + freshness * 0.25 + velocity * 0.2 + participation * 0.2);
+  const rounded = (value) => Math.round(value * 10) / 10;
+  return {
+    engagement: rounded(engagement),
+    freshness: rounded(freshness),
+    velocity: rounded(velocity),
+    participation: rounded(participation),
+    score: rounded(score),
+  };
+}
+
 function groupSignals(rows) {
   const groups = new Map();
   for (const row of rows.filter((article) => article.publish_decision === "publish")) {
@@ -142,6 +174,7 @@ function groupSignals(rows) {
       if (!seenUrls.has(article.url)) {
         seenUrls.add(article.url);
         sources.push({
+          sourceId: article.source_id,
           name: article.source_name,
           href: article.url,
           layer: sourceLayer(article),
@@ -178,6 +211,7 @@ function groupSignals(rows) {
       confidence,
       verificationState,
       sourceMix,
+      heat: computeSignalHeat(articles),
       accent: representative.accent,
       evidence,
       representativeSource,
@@ -246,7 +280,7 @@ function mapSources(rows) {
   const now = Date.now();
   return rows.map((source) => {
     const lastSuccess = dateValue(source.last_success_at);
-    const cadenceHours = Number(String(source.cadence || "").match(/^(4|8|12|24)h$/)?.[1] || 24);
+    const cadenceHours = Number(String(source.cadence || "").match(/^(1|2|4|8|12|24)h$/)?.[1] || 24);
     const staleAfter = cadenceHours * 1.5 * 3_600_000 + 15 * 60_000;
     let status = "待首次采集";
     if (source.last_status === "error") status = "异常";
@@ -258,6 +292,8 @@ function mapSources(rows) {
       name: source.name,
       class: source.source_class,
       layer: sourceLayer(source),
+      family: source.source_family || "official",
+      independentGroup: source.independent_group || source.source_id,
       language: ["zh", "en", "mixed"].includes(source.language)
         ? source.language
         : (/中文/.test(source.source_class || "") ? "zh" : /英文/.test(source.source_class || "") ? "en" : "en"),
@@ -272,6 +308,90 @@ function mapSources(rows) {
       itemCount: Number(source.item_count || 0),
     };
   });
+}
+
+const COVERAGE_LAYERS = ["official", "practitioner", "community"];
+const COVERAGE_FAMILIES = ["official", "repository", "practitioner", "community", "research"];
+
+function emptyCoverageBucket() {
+  return { configured: 0, available: 0, effective: 0 };
+}
+
+export function buildSourceCoverage(sources, effectiveSourceIds = new Set()) {
+  const byLayer = Object.fromEntries(COVERAGE_LAYERS.map((key) => [key, emptyCoverageBucket()]));
+  const byFamily = Object.fromEntries(COVERAGE_FAMILIES.map((key) => [key, emptyCoverageBucket()]));
+  const total = emptyCoverageBucket();
+  const configuredGroups = new Set();
+  const availableGroups = new Set();
+  const effectiveGroups = new Set();
+  for (const source of sources || []) {
+    const available = ["正常", "降级"].includes(source.status);
+    const effective = Boolean(source.id && effectiveSourceIds.has(source.id));
+    const independentGroup = source.independentGroup || source.id;
+    if (independentGroup) configuredGroups.add(independentGroup);
+    if (available && independentGroup) availableGroups.add(independentGroup);
+    if (effective && independentGroup) effectiveGroups.add(independentGroup);
+    total.configured += 1;
+    if (available) total.available += 1;
+    if (effective) total.effective += 1;
+    for (const [collection, key] of [[byLayer, source.layer], [byFamily, source.family]]) {
+      if (!collection[key]) collection[key] = emptyCoverageBucket();
+      collection[key].configured += 1;
+      if (available) collection[key].available += 1;
+      if (effective) collection[key].effective += 1;
+    }
+  }
+  return {
+    total,
+    byLayer,
+    byFamily,
+    independentGroups: {
+      configured: configuredGroups.size,
+      available: availableGroups.size,
+      effective: effectiveGroups.size,
+    },
+  };
+}
+
+export function normalizeSourceCoverage(coverage, legacyStatus = {}) {
+  if (coverage && coverage.total && coverage.byLayer && coverage.byFamily) {
+    return {
+      ...coverage,
+      independentGroups: coverage.independentGroups || { configured: 0, available: 0, effective: 0 },
+    };
+  }
+  return {
+    total: {
+      configured: Number(legacyStatus.sourceCount || 0),
+      available: Number(legacyStatus.availableSourceCount ?? (
+        Number(legacyStatus.healthySourceCount || 0) + Number(legacyStatus.degradedSourceCount || 0)
+      )),
+      effective: 0,
+    },
+    byLayer: {},
+    byFamily: {},
+    independentGroups: { configured: 0, available: 0, effective: 0 },
+  };
+}
+
+function buildDiscussionPulses(rows) {
+  return rows
+    .filter((row) => row.publish_decision === "watch")
+    .filter((row) => sourceLayer(row) === "community")
+    .filter(isLlmEditorialReady)
+    .map((row) => ({
+      sourceId: row.source_id,
+      sourceName: row.source_name,
+      href: row.url,
+      originalTitle: row.original_title,
+      summary: row.summary,
+      implication: row.implication,
+      language: inferLanguage(row),
+      publishedAt: eventAt(row),
+      heat: computeSignalHeat([row]),
+      verificationState: "community-only",
+      confidence: "待溯源",
+    }));
 }
 
 function emptyLayerCounts() {
@@ -373,8 +493,16 @@ async function buildModelPulses(rows) {
 export async function buildSnapshot(database) {
   const articleRows = getRecentArticles(database, Number(process.env.RADAR_SNAPSHOT_ARTICLES || 320));
   const candidateRows = getRecentCandidateArticles(database, Number(process.env.RADAR_SNAPSHOT_CANDIDATES || 120));
+  const discussionRows = getRecentCommunityWatchArticles(database, Number(process.env.RADAR_SNAPSHOT_DISCUSSIONS || 160));
   const signals = groupSignals(articleRows).slice(0, Number(process.env.RADAR_SNAPSHOT_SIGNALS || 80));
+  const discussionPulses = buildDiscussionPulses(discussionRows);
   const sources = mapSources(getSourceHealth(database));
+  const effectiveSourceIds = new Set([
+    ...signals.flatMap((signal) => signal.sources).map((source) => source.sourceId),
+    ...discussionPulses.map((pulse) => pulse.sourceId),
+  ].filter(Boolean));
+  const coverage = buildSourceCoverage(sources, effectiveSourceIds);
+  const sourceCoverage = { total: coverage.total, byLayer: coverage.byLayer, byFamily: coverage.byFamily };
   const latestRun = getLatestRun(database);
   const successfulRun = database.prepare("SELECT * FROM runs WHERE status IN ('success', 'partial') ORDER BY id DESC LIMIT 1").get() || null;
   const analysisModes = new Set(articleRows.map((article) => article.analysis_mode));
@@ -386,7 +514,18 @@ export async function buildSnapshot(database) {
   const runAnalysisMode = latestRun?.analysis_mode || "none";
   const modelLandscapeState = getModelLandscapeState(database);
   const publicSignals = signals.map((signal) => {
-    const publicSignal = { ...signal };
+    const publicSignal = {
+      ...signal,
+      sources: signal.sources.map((source) => {
+        const publicSource = { ...source };
+        delete publicSource.sourceId;
+        return publicSource;
+      }),
+      representativeSource: signal.representativeSource
+        ? { ...signal.representativeSource }
+        : signal.representativeSource,
+    };
+    if (publicSignal.representativeSource) delete publicSignal.representativeSource.sourceId;
     delete publicSignal.relevanceScore;
     return publicSignal;
   });
@@ -405,11 +544,14 @@ export async function buildSnapshot(database) {
       healthySourceCount: sources.filter((source) => source.status === "正常").length,
       degradedSourceCount: sources.filter((source) => source.status === "降级").length,
       availableSourceCount: sources.filter((source) => ["正常", "降级"].includes(source.status)).length,
+      sourceCoverage,
+      sourceGroupCoverage: coverage.independentGroups,
       signalCount: signals.length,
       articleCount: getArticleCount(database),
       stale: !lastSuccessfulAt || Date.now() - dateValue(lastSuccessfulAt) > 12 * 3_600_000,
     },
     signals: publicSignals,
+    discussionPulses,
     concepts: await buildConcepts(signals),
     candidateConcepts: buildCandidateConcepts(candidateRows),
     modelPulses: await buildModelPulses(articleRows),

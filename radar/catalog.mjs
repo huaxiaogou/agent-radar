@@ -5,7 +5,15 @@ const catalogUrl = new URL("../config/sources.json", import.meta.url);
 const LAYERS = new Set(["official", "practitioner", "community"]);
 const LANGUAGES = new Set(["zh", "en", "mixed"]);
 const KINDS = new Set(["feed", "html", "json"]);
-const JSON_PARSERS = new Set(["github-issues", "bluesky-search", "hacker-news"]);
+const JSON_PARSERS = new Set([
+  "github-issues",
+  "bluesky-search",
+  "hacker-news",
+  "huggingface-daily-papers",
+  "openreview-notes",
+  "dblp-publications",
+]);
+const FAMILIES = new Set(["official", "repository", "practitioner", "community", "research"]);
 const HTML_PARSERS = new Set(["claude-changelog"]);
 
 function assertPublicHttpsUrl(value, label) {
@@ -56,6 +64,7 @@ export function validateSourceCatalog(catalog) {
     if (ids.has(source.id)) throw new Error(`来源 id 重复：${source.id}`);
     if (!KINDS.has(source.kind)) throw new Error(`来源 ${source.id} kind 无效：${source.kind}`);
     if (!LAYERS.has(source.layer)) throw new Error(`来源 ${source.id} 缺少有效 layer`);
+    if (!FAMILIES.has(source.family)) throw new Error(`来源 ${source.id} 缺少有效 family：${source.family || "未配置"}`);
     if (!LANGUAGES.has(source.language)) throw new Error(`来源 ${source.id} 缺少有效 language`);
     for (const key of ["url", "homepage"]) assertPublicHttpsUrl(source[key], `来源 ${source.id} ${key}`);
     validateParser(source.kind, source.parser, `来源 ${source.id}`);

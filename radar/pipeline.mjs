@@ -1,5 +1,5 @@
 import { contentHash, enrichItem, discoverSourceItemsWithDiagnostics } from "./fetch.mjs";
-import { analyzeItem, chooseSignalSlug, resolveAnalysisProvider, scoreRelevance } from "./analyze.mjs";
+import { analyzeItem, chooseSignalSlug, resolveAnalysisProvider, scoreRelevance, shouldExploreCandidate } from "./analyze.mjs";
 import {
   articleExists,
   beginRun,
@@ -73,10 +73,12 @@ export function selectFairly(candidates, limit) {
   return selected;
 }
 
-function finalRelevanceScore(ruleScore, analysis) {
+function finalRelevanceScore(ruleScore, analysis, explorationCandidate = false) {
   const aiScore = Number(analysis.relevanceScore);
   if (!Number.isFinite(aiScore)) return ruleScore;
-  return Math.max(0, Math.min(100, Math.round((ruleScore + (aiScore - 50) / 12.5) * 10) / 10));
+  const blended = Math.round((ruleScore + (aiScore - 50) / 12.5) * 10) / 10;
+  const explorationFloor = explorationCandidate ? Math.round(aiScore) / 10 : 0;
+  return Math.max(0, Math.min(100, Math.max(blended, explorationFloor)));
 }
 
 function persistedArticle(item, analysis, relevanceScore, signalSlug = null) {
@@ -109,7 +111,7 @@ function persistedArticle(item, analysis, relevanceScore, signalSlug = null) {
 }
 
 export function isSourceDue(source, { trigger = "manual", lastAttemptAt = null, now = new Date().toISOString() } = {}) {
-  const match = /^(4|8|12|24)h$/.exec(String(source?.cadence || "").trim());
+  const match = /^(1|2|4|8|12|24)h$/.exec(String(source?.cadence || "").trim());
   if (!match) throw new Error(`来源采集周期 cadence 无效：${source?.cadence || "未配置"}`);
   if (trigger !== "systemd") return true;
   if (!lastAttemptAt) return true;
@@ -211,6 +213,7 @@ export async function runIngestion({
           sourceClass: result.source.class,
           independentGroup: result.source.independentGroup,
           sourceLayer: result.source.layer,
+          sourceFamily: result.source.family,
           sourceLanguage: result.source.language,
           sourceFocus: result.source.focus,
           alwaysRelevant: result.source.alwaysRelevant === true,
@@ -229,11 +232,15 @@ export async function runIngestion({
     );
     const enriched = enrichedItems.flatMap((item) => {
       const relevanceScore = scoreRelevance(item, { alwaysRelevant: item.alwaysRelevant });
-      if (relevanceScore < discoveryThreshold) {
+      const explorationCandidate = shouldExploreCandidate(item, {
+        family: item.sourceFamily,
+        layer: item.sourceLayer,
+      });
+      if (relevanceScore < discoveryThreshold && !explorationCandidate) {
         skippedCount += 1;
         return [];
       }
-      return [{ ...item, relevanceScore }];
+      return [{ ...item, relevanceScore, explorationCandidate }];
     });
     let analysisFallbackCount = 0;
     let analysisRepairCount = 0;
@@ -254,25 +261,36 @@ export async function runIngestion({
       },
     );
 
-    const ranked = analyzed.map(({ item, analysis }) => ({
-      item,
-      analysis,
-      relevanceScore: finalRelevanceScore(item.relevanceScore, analysis),
-    }));
+    const ranked = analyzed.map(({ item, analysis }) => {
+      // 互动只负责把低规则相关性的近期社区候选送进编辑分析，绝不能授权公开。
+      // 即使外部模型返回 publish/100 分，也必须确定性地停留在 watch 区域。
+      const explorationOnly = item.explorationCandidate === true && item.relevanceScore < discoveryThreshold;
+      const guardedAnalysis = explorationOnly && analysis.publishDecision === "publish"
+        ? { ...analysis, publishDecision: "watch" }
+        : analysis;
+      return {
+        item,
+        analysis: guardedAnalysis,
+        relevanceScore: finalRelevanceScore(item.relevanceScore, guardedAnalysis, item.explorationCandidate),
+      };
+    });
     let retiredCount = 0;
     for (const { item, analysis, relevanceScore } of ranked) {
       if (analysis.publishDecision === "reject" && retireWatchedArticle(database, persistedArticle(item, analysis, relevanceScore))) {
         retiredCount += 1;
       }
     }
-    const isWatchedConceptCandidate = ({ analysis, relevanceScore }) => {
+    const isWatchedConceptCandidate = ({ item, analysis, relevanceScore }) => {
       return analysis.publishDecision === "watch"
         && relevanceScore >= discoveryThreshold
-        && Boolean(String(analysis.candidateConcept || "").trim());
+        && (
+          item.explorationCandidate === true
+          || Boolean(String(analysis.candidateConcept || "").trim())
+        );
     };
     const publishable = ranked.flatMap(({ item, analysis, relevanceScore }) => {
       if (analysis.publishDecision !== "publish" || relevanceScore < publishThreshold) {
-        if (!isWatchedConceptCandidate({ analysis, relevanceScore })) skippedCount += 1;
+        if (!isWatchedConceptCandidate({ item, analysis, relevanceScore })) skippedCount += 1;
         return [];
       }
       return [{ item, analysis, relevanceScore }];
@@ -391,7 +409,15 @@ export async function runIngestion({
     if (status === "failed") throw new Error("所有来源采集失败，保留上一次成功快照");
     const snapshot = await buildSnapshot(database);
     await writeSnapshotAtomic(snapshot);
-    return { runId, ...result, snapshot: snapshot.status };
+    return {
+      runId,
+      ...result,
+      snapshot: {
+        ...snapshot.status,
+        signals: snapshot.signals,
+        discussionPulses: snapshot.discussionPulses,
+      },
+    };
   } catch (error) {
     if (!runFinished) {
       finishRun(database, runId, {

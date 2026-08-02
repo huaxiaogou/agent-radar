@@ -22,6 +22,7 @@ function sourceFixture(overrides = {}) {
     url: "https://primary.example/feed.xml",
     homepage: "https://primary.example/",
     class: "一手工程",
+    family: "official",
     layer: "official",
     language: "en",
     priority: "P0",
@@ -41,6 +42,32 @@ function emptyFeed(title = "Empty feed") {
 function staleFeed(title = "Historical feed") {
   const slug = encodeURIComponent(title.toLowerCase().replace(/\s+/g, "-"));
   return `<?xml version="1.0"?><rss version="2.0"><channel><title>${title}</title><item><title>${title} archived agent item</title><link>https://archive.example/${slug}</link><description>Historical agent engineering archive.</description><pubDate>Wed, 01 Jan 2020 00:00:00 GMT</pubDate></item></channel></rss>`;
+}
+
+function staleJsonBody(source) {
+  const slug = source.id.replace(/[^a-z0-9-]/gi, "-");
+  if (source.parser === "github-issues") {
+    return [{
+      title: `${source.name} historical agent issue`,
+      html_url: `https://github.com/example/${slug}/issues/1`,
+      body: "Historical agent engineering issue.",
+      created_at: "2020-01-01T00:00:00Z",
+      comments: 1,
+    }];
+  }
+  if (source.parser === "hacker-news") {
+    return { hits: [{ objectID: slug, title: `${source.name} historical agent discussion`, story_text: "Historical agent discussion.", created_at: "2020-01-01T00:00:00Z", points: 1, num_comments: 1 }] };
+  }
+  if (source.parser === "bluesky-search") {
+    return { posts: [{ uri: `at://did:plc:radartest/app.bsky.feed.post/${slug}`, author: { handle: "radar-test.example.com" }, record: { text: `${source.name} historical agent discussion`, createdAt: "2020-01-01T00:00:00Z" }, likeCount: 1 }] };
+  }
+  if (source.parser === "huggingface-daily-papers") {
+    return [{ paper: { id: "2001.00001", title: `${source.name} historical agent paper`, summary: "Historical agent research." }, publishedAt: "2020-01-01T00:00:00Z" }];
+  }
+  if (source.parser === "dblp-publications") {
+    return { result: { hits: { hit: [{ info: { title: `${source.name} historical agent paper`, url: `https://dblp.org/rec/journals/test/${slug}`, year: "2020" } }] } } };
+  }
+  throw new Error(`缺少 JSON 测试夹具：${source.parser}`);
 }
 
 function timeoutError() {
@@ -426,9 +453,7 @@ test("pipeline persists degraded source health, counts it as available, and mark
       }
       const source = primaryKinds.get(url);
       if (source?.kind === "json") {
-        const body = source.parser === "bluesky-search" ? { posts: [] }
-          : source.parser === "hacker-news" ? { hits: [] }
-            : [];
+        const body = staleJsonBody(source);
         return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
       }
       return new Response(staleFeed(), { status: 200, headers: { "content-type": "application/rss+xml" } });

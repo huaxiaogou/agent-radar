@@ -246,7 +246,13 @@ export function contentHash(...parts) {
 async function fetchPublicResource(url, options = {}, { asBuffer = false } = {}) {
   const customFetch = Object.hasOwn(options, "fetchImpl");
   const fetchImpl = customFetch ? options.fetchImpl : NATIVE_FETCH;
-  const { resolveHostname, createDispatcher = defaultCreateDispatcher, maxRedirects = MAX_REDIRECTS } = options;
+  const {
+    resolveHostname,
+    createDispatcher = defaultCreateDispatcher,
+    maxRedirects = MAX_REDIRECTS,
+    authorization,
+    authorizedHostname,
+  } = options;
   if (customFetch && typeof resolveHostname !== "function") {
     throw new Error("自定义 fetch 必须显式提供可信 DNS resolver");
   }
@@ -268,6 +274,7 @@ async function fetchPublicResource(url, options = {}, { asBuffer = false } = {})
         headers: {
           accept: "application/json, application/atom+xml, application/rss+xml, application/xml, text/xml, text/html;q=0.9, */*;q=0.5",
           "user-agent": USER_AGENT,
+          ...(authorization && target.hostname === authorizedHostname ? { authorization } : {}),
         },
         signal: AbortSignal.timeout(Number(process.env.RADAR_FETCH_TIMEOUT_MS || 15000)),
       });
@@ -306,14 +313,18 @@ export function fetchPublicBytes(url, options = {}) {
   return fetchPublicResource(url, options, { asBuffer: true });
 }
 
-async function fetchText(url, attempts = 2, fetchOptions = {}) {
+async function fetchText(url, attempts = 2, fetchOptions = {}, { shouldRetry = () => true } = {}) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       return await fetchPublicText(url, fetchOptions);
     } catch (error) {
       lastError = error;
-      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      if (attempt < attempts && shouldRetry(error)) {
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      } else {
+        break;
+      }
     }
   }
   throw lastError;
@@ -328,7 +339,47 @@ function endpointSource(source, endpoint) {
     homepage: endpoint.discoveryHomepage || source.homepage,
     parser: endpoint.parser ?? (sameKind ? source.parser : undefined),
     includeUrlPatterns: endpoint.includeUrlPatterns ?? (sameKind ? source.includeUrlPatterns : undefined),
+    allowEmpty: endpoint.allowEmpty ?? source.allowEmpty ?? false,
   };
+}
+
+function directFetchOptions(endpoint, fetchOptions) {
+  const token = String(process.env.GITHUB_TOKEN || "").trim();
+  if (!token || endpoint.role !== "primary") return fetchOptions;
+  let hostname;
+  try {
+    hostname = new URL(endpoint.url).hostname;
+  } catch {
+    return fetchOptions;
+  }
+  if (hostname !== "api.github.com") return fetchOptions;
+  return {
+    ...fetchOptions,
+    authorization: `Bearer ${token}`,
+    authorizedHostname: "api.github.com",
+  };
+}
+
+function isGithubAuthenticationRejection(error) {
+  return ["HTTP 401", "HTTP 403"].includes(nestedErrorCode(error));
+}
+
+async function fetchDirectEndpoint(endpoint, fetchOptions) {
+  const authenticatedOptions = directFetchOptions(endpoint, fetchOptions);
+  if (!authenticatedOptions.authorization) {
+    return fetchText(endpoint.url, 2, authenticatedOptions);
+  }
+  try {
+    return await fetchText(endpoint.url, 2, authenticatedOptions, {
+      shouldRetry: (error) => !isGithubAuthenticationRejection(error),
+    });
+  } catch (error) {
+    if (!isGithubAuthenticationRejection(error)) throw error;
+    const anonymousOptions = { ...fetchOptions };
+    delete anonymousOptions.authorization;
+    delete anonymousOptions.authorizedHostname;
+    return fetchPublicText(endpoint.url, anonymousOptions);
+  }
 }
 
 function safeEndpointLabel(value) {
@@ -503,6 +554,81 @@ function hackerNewsItems(document) {
   });
 }
 
+function objectValue(value) {
+  if (value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "value")) return value.value;
+  return value;
+}
+
+function huggingFaceDailyPaperItems(document, source) {
+  const rows = Array.isArray(document) ? document : asArray(document?.papers || document?.items || document?.results);
+  return rows.flatMap((entry) => {
+    const paper = entry?.paper || entry;
+    const id = cleanText(paper?.id || paper?._id || paper?.paperId || entry?.id, 120);
+    const title = cleanText(paper?.title || entry?.title, 260);
+    const url = id ? canonicalizeUrl(`https://huggingface.co/papers/${encodeURIComponent(id)}`, source.homepage || source.url) : null;
+    if (!url || !title) return [];
+    return [{
+      title,
+      url,
+      excerpt: cleanText(paper?.summary || paper?.abstract || entry?.summary || entry?.abstract || "", 2800),
+      publishedAt: normalizeDate(entry?.publishedAt || entry?.published_at || paper?.publishedAt || paper?.published_at),
+      engagementCount:
+        numeric(entry?.upvotes ?? entry?.votes ?? paper?.upvotes ?? paper?.votes)
+        + numeric(entry?.numComments ?? entry?.num_comments ?? entry?.replyCount ?? entry?.replies ?? paper?.numComments ?? paper?.replyCount),
+    }];
+  });
+}
+
+function dblpPublicationItems(document, source) {
+  const rows = asArray(document?.result?.hits?.hit);
+  return rows.flatMap((hit) => {
+    const info = hit?.info || {};
+    const title = cleanText(info.title, 260);
+    const externalLinks = asArray(info.ee).map((value) => canonicalizeUrl(valueText(value))).filter(Boolean);
+    const doiUrl = info.doi ? canonicalizeUrl(`https://doi.org/${String(info.doi).replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "")}`) : null;
+    const dblpUrl = canonicalizeUrl(info.url, source.homepage || source.url);
+    const url = externalLinks[0] || doiUrl || dblpUrl;
+    if (!title || !url) return [];
+    const authors = asArray(info?.authors?.author)
+      .map((author) => cleanText(author?.text || author, 100))
+      .filter(Boolean)
+      .slice(0, 8)
+      .join("、");
+    const excerpt = [
+      cleanText(info.venue, 160),
+      authors ? `作者：${authors}` : "",
+      info.doi ? `DOI：${cleanText(info.doi, 160)}` : "",
+      dblpUrl && dblpUrl !== url ? `DBLP：${dblpUrl}` : "",
+    ].filter(Boolean).join("；");
+    return [{
+      title,
+      url,
+      excerpt,
+      publishedAt: null,
+      engagementCount: 0,
+    }];
+  });
+}
+
+function openReviewNoteItems(document, source) {
+  const rows = Array.isArray(document) ? document : asArray(document?.notes || document?.results || document?.items);
+  return rows.flatMap((note) => {
+    const forum = cleanText(note?.forum || note?.forumId || note?.id, 160);
+    const title = cleanText(objectValue(note?.content?.title) || note?.title, 260);
+    const url = forum ? canonicalizeUrl(`https://openreview.net/forum?id=${encodeURIComponent(forum)}`, source.homepage || source.url) : null;
+    if (!url || !title) return [];
+    const timestamp = note?.cdate || note?.pdate || note?.tcdate || note?.tmdate;
+    const publishedAt = numeric(timestamp) ? normalizeDate(new Date(Number(timestamp)).toISOString()) : normalizeDate(timestamp);
+    return [{
+      title,
+      url,
+      excerpt: cleanText(objectValue(note?.content?.abstract) || note?.abstract || "", 2800),
+      publishedAt,
+      engagementCount: numeric(note?.replyCount || note?.reply_count || note?.details?.replyCount || note?.details?.replies?.length),
+    }];
+  });
+}
+
 export function parseJsonSource(body, source) {
   let document;
   try {
@@ -514,6 +640,9 @@ export function parseJsonSource(body, source) {
   if (source.parser === "github-issues") items = githubIssueItems(document, source);
   else if (source.parser === "bluesky-search") items = blueskyItems(document);
   else if (source.parser === "hacker-news") items = hackerNewsItems(document);
+  else if (source.parser === "huggingface-daily-papers") items = huggingFaceDailyPaperItems(document, source);
+  else if (source.parser === "openreview-notes") items = openReviewNoteItems(document, source);
+  else if (source.parser === "dblp-publications") items = dblpPublicationItems(document, source);
   else throw new Error(`不支持的 JSON 来源解析器：${source.parser || "未配置"}`);
   return items.slice(0, source.maxItems || 12);
 }
@@ -592,7 +721,7 @@ function parseHtml(body, pageUrl, source) {
 
   const sections = collectHeadingSections($, pageUrl, source.maxItems || 12);
   for (const item of sections) {
-    if (!seen.has(item.url)) candidates.push(item);
+    if (matchesSourceRules(item.url, source) && !seen.has(item.url)) candidates.push(item);
   }
 
   return candidates.slice(0, source.maxItems || 12);
@@ -642,15 +771,12 @@ export async function discoverSourceItemsWithDiagnostics(source, fetchOptions = 
     ...(source.fallbacks || []).map((fallback, index) => ({ ...fallback, role: "fallback", index: index + 1 })),
   ];
   const diagnostics = [];
-  const hasConfiguredRelay = Boolean(String(process.env.RADAR_FETCH_RELAY_TEMPLATE || "").trim());
-  const requireDirectItems = directEndpoints.length > 1 || hasConfiguredRelay;
-
   for (const endpoint of directEndpoints) {
     const parsingSource = endpointSource(source, endpoint);
     try {
-      const response = await fetchText(endpoint.url, 2, fetchOptions);
+      const response = await fetchDirectEndpoint(endpoint, fetchOptions);
       const items = parseDiscoveryResponse(response, parsingSource, response.finalUrl);
-      if (!items.length && requireDirectItems) throw emptyDiscoveryError();
+      if (!items.length && !parsingSource.allowEmpty) throw emptyDiscoveryError();
       return {
         sourceId: source.id,
         status: endpoint.role === "primary" ? "success" : "degraded",
@@ -691,7 +817,7 @@ export async function discoverSourceItemsWithDiagnostics(source, fetchOptions = 
         const response = await fetchText(relayEndpoint.url, 2, fetchOptions);
         // Relay 的 finalUrl 属于传输层；相对文章链接必须相对原始来源端点解析。
         const items = parseDiscoveryResponse(response, parsingSource, endpoint.url);
-        if (!items.length) throw emptyDiscoveryError();
+        if (!items.length && !parsingSource.allowEmpty) throw emptyDiscoveryError();
         return {
           sourceId: source.id,
           status: "degraded",

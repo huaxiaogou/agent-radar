@@ -70,17 +70,17 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=${APP_DIR}/.data ${APP_DIR}/.run
-TimeoutStartSec=20min
+TimeoutStartSec=2h
 EOF
 
 cat >"${TIMER_TEMP}" <<EOF
 ${MARKER}
 [Unit]
-Description=Run Agent Radar ingestion every four hours
+Description=Wake Agent Radar ingestion every hour
 
 [Timer]
 OnBootSec=5min
-OnUnitActiveSec=4h
+OnUnitActiveSec=1h
 RandomizedDelaySec=10min
 Persistent=true
 Unit=${SERVICE_NAME}
@@ -96,7 +96,7 @@ chmod 700 "${APP_DIR}/.data" "${APP_DIR}/.run"
 "${SUDO[@]}" systemctl daemon-reload
 "${SUDO[@]}" systemctl enable --now "${TIMER_NAME}"
 
-echo "定时采集已启用：每 4 小时执行一次，并带 0-10 分钟随机延迟。"
+echo "定时采集已启用：每 1 小时唤醒一次，并带 0-10 分钟随机延迟；每个来源仍按自身 cadence 判断是否采集。"
 "${SUDO[@]}" systemctl list-timers "${TIMER_NAME}" --no-pager
 echo "手工执行：sudo systemctl start ${SERVICE_NAME}"
 echo "查看日志：sudo journalctl -u ${SERVICE_NAME} -n 100 --no-pager"

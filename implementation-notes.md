@@ -521,3 +521,58 @@
 - Edge cases found: 4; SVG paint order, off-screen picker selection, over-aggressive context dimming and wide-screen label legibility are handled.
 - Questions awaiting review: 0.
 - Next session should read this section and the preceding legibility session before changing the model chart again.
+
+## Frontier discovery and source coverage session
+
+### Deviations
+
+- The former registry treated evidence layer as the only source taxonomy. The expanded design adds `family` for discovery responsibility while preserving official/practitioner/community as the only confidence-bearing Evidence Layer.
+- Generic high-engagement discussions previously failed the fixed-term gate before model review. They now enter a separate exploration path only when recent and sufficiently active; heat never mutates deterministic relevance or evidence scores.
+
+### Discovered edge cases
+
+- Repository releases and repository issue discussions belong to the same discovery family but different evidence layers. Their `independentGroup` values prevent the same organization or platform from appearing as independent corroboration.
+- Daily Papers and research indexes return nested JSON fields. Daily Papers heat sums upvotes and discussion counts; the OpenReview challenge endpoint is disabled and replaced by a DBLP JSON parser that prefers the canonical paper/DOI link, falls back to DBLP, and never invents engagement.
+- A high AI relevance score for an explored new term needs a bounded final-score path to become watch/publish; the floor comes only from the LLM relevance output, never from raw engagement, and `reject` remains terminal.
+- Signal heat must stay finite with empty, missing or malformed engagement/date fields. Log-bounded engagement, exponential freshness and bounded velocity/participation components are normalized to 0–100.
+- Old snapshots have no family coverage. Runtime normalization derives only legacy totals and leaves historical by-layer/by-family maps empty instead of inventing classifications.
+- An hourly timer can overlap a slow mainland scan if every foreign endpoint reaches its timeout. The existing exclusive lock remains authoritative and the systemd task timeout is extended to 2 hours; per-source cadence still prevents all 89 sources from running every hour.
+
+## 2026-08-03 · Deterministic exploration and public discussion pulses
+
+- High participation is an admission signal only. It is removed from LLM input; a candidate admitted solely through the exploration gate can be downgraded from model `publish` to `watch`, while model `reject` remains terminal.
+- Missing, invalid, future or older-than-seven-days timestamps cannot open the exploration gate.
+- Only community watch rows that pass the existing OpenAI/DeepSeek Chinese editorial readiness gate become `discussionPulses`. Each pulse keeps the original title and URL, computes heat from its own row, and remains `community-only / 待溯源`; it never enters signal evidence or confidence.
+- Source coverage now reports channel counts and deduplicated independent groups. Effective coverage includes sources represented by public signals and public discussion pulses.
+- Successful HTTP responses with zero parsed items are unavailable by default. Generic HTML directories use per-site article URL allowlists to stop navigation, archive, category and signup links entering analysis.
+- Optional GitHub API credentials are scoped to primary direct requests whose exact host is `api.github.com`; fallback, relay and cross-host redirect requests are uncredentialed.
+- Linux.do exposes a public RSS URL but may return a Cloudflare challenge on some routes. The collector uses only the public URL and normal relay chain, and does not automate login or challenge bypass.
+
+### Questions for review
+
+- The 89 configured endpoints are structurally valid public HTTPS sources, but availability varies by ISP, WAF and anonymous GitHub/API quotas. Production server health after one full manual scan remains required external evidence.
+
+### Session summary
+
+- Deviations count: 2.
+- Registry: 89 enabled sources — official 27, repository 26, practitioner 12, community 13, research 11.
+- Edge cases found: 7; family/layer separation, research JSON shapes, explored-candidate scoring, finite heat, legacy coverage, hourly overlap and public-WAF behavior are handled.
+- Questions awaiting review: 1 production-network validation item.
+- Next session should read this section, `config/sources.json`, `radar/analyze.mjs`, `radar/fetch.mjs`, `radar/snapshot.mjs` and `scripts/install-scheduler.sh` before changing discovery breadth or coverage semantics.
+
+## 2026-08-03 · Frontier discovery final risk review
+
+- DBLP records that expose only a publication year now keep `publishedAt=null`. Treating the year as January 1 created false precision and caused the 120-day age gate to reject every current DBLP result; unknown month/day is now admitted without pretending it is recent.
+- `github-agents-discussions` shares `independentGroup=openai` with OpenAI releases and official channels. A vendor's own issue tracker can contribute discovery and community evidence, but it cannot cross-verify that vendor's official claim.
+- Effective coverage is calculated from sources retained by the final public signal slice plus public discussion pulses. Articles beyond the 80-signal public boundary no longer inflate the “current snapshot effective” count.
+- Internal `sourceId` metadata is used to calculate coverage and then removed from both public signal sources and `representativeSource`, preserving the existing public snapshot contract.
+- GitHub API 401/403 responses retry the primary once without an invalid optional token. Cline and OpenHands issue collectors also have same-repository HTML fallbacks restricted to numeric issue URLs; the OpenHands endpoint follows the canonical `OpenHands/OpenHands` repository.
+- A local real-network audit with an 8-second endpoint timeout checked 89 enabled channels: 85 were available and yielded 1,028 parsed items. Official (27/27), repository (26/26) and research (11/11) were fully available; Linux.do returned 403, two Reddit feeds returned 429 and Qbitai exceeded the short audit timeout.
+
+### Final verification
+
+- Targeted frontier contract: 20/20 passed.
+- Full unit and integration suite: 142/142 passed.
+- Server-rendered route suite: 15/15 passed.
+- Next.js production build, TypeScript, ESLint and `git diff --check` passed.
+- Remaining external risk is route-specific WAF/rate limiting from the mainland server; failures remain explicit source-health errors and never count an empty parse as healthy.

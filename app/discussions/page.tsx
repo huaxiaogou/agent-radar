@@ -30,7 +30,23 @@ function publishedLabel(value?: string) {
 export default async function DiscussionsPage() {
   const snapshot = await getRadarSnapshot();
   const seen = new Set<string>();
-  const discussions = snapshot.signals.flatMap((signal) => signal.sources
+  const pulseDiscussions = snapshot.discussionPulses.flatMap((pulse) => {
+    if (seen.has(pulse.href)) return [];
+    seen.add(pulse.href);
+    return [{
+      name: pulse.sourceName,
+      href: pulse.href,
+      originalTitle: pulse.originalTitle,
+      language: pulse.language,
+      publishedAt: pulse.publishedAt,
+      summary: pulse.summary,
+      implication: pulse.implication,
+      heat: pulse.heat,
+      verificationState: pulse.verificationState,
+      confidence: pulse.confidence,
+    }];
+  });
+  const signalDiscussions = snapshot.signals.flatMap((signal) => signal.sources
     .filter((source) => source.layer === "community")
     .flatMap((source) => {
       if (seen.has(source.href)) return [];
@@ -40,11 +56,17 @@ export default async function DiscussionsPage() {
         ...source,
         originalTitle,
         language: source.language || inferredLanguage(originalTitle),
-        signal,
+        publishedAt: source.publishedAt || signal.publishedAt,
+        summary: signal.summary,
+        implication: signal.implication,
+        heat: source.heat || signal.heat,
+        verificationState: signal.verificationState || "community-only",
+        confidence: signal.verificationState === "community-only" ? "待溯源" : "中等",
       }];
-    }))
-    .sort((left, right) => new Date(right.publishedAt || right.signal.publishedAt || 0).getTime()
-      - new Date(left.publishedAt || left.signal.publishedAt || 0).getTime());
+    }));
+  const discussions = [...pulseDiscussions, ...signalDiscussions]
+    .sort((left, right) => new Date(right.publishedAt || 0).getTime()
+      - new Date(left.publishedAt || 0).getTime());
 
   const chineseCount = discussions.filter((discussion) => discussion.language === "zh").length;
   const englishCount = discussions.length - chineseCount;
@@ -79,22 +101,30 @@ export default async function DiscussionsPage() {
               className="discussion-card"
               data-discussion-language={discussion.language}
               data-source-layer="community"
+              data-heat-score={discussion.heat?.score ?? 0}
               key={discussion.href}
             >
               <header>
                 <span className="discussion-language">{discussion.language === "zh" ? "中文" : "ENGLISH"}</span>
                 <span>{discussion.name}</span>
-                {publishedLabel(discussion.publishedAt || discussion.signal.publishedAt) && (
-                  <time dateTime={discussion.publishedAt || discussion.signal.publishedAt}>
-                    {publishedLabel(discussion.publishedAt || discussion.signal.publishedAt)} CST
+                {publishedLabel(discussion.publishedAt) && (
+                  <time dateTime={discussion.publishedAt}>
+                    {publishedLabel(discussion.publishedAt)} CST
                   </time>
                 )}
-                <b>社区观察 · 待交叉验证</b>
+                <b>社区观察 · {discussion.confidence}</b>
               </header>
               <h2 lang={discussion.language === "zh" ? "zh-CN" : "en"}>{discussion.originalTitle}</h2>
-              <p>{discussion.signal.summary}</p>
+              <p>{discussion.summary}</p>
+              <div className="discussion-heat" aria-label={`热度 ${discussion.heat?.score ?? 0}`}>
+                <strong>热度 {discussion.heat?.score ?? 0}</strong>
+                <span>互动 {discussion.heat?.engagement ?? 0}</span>
+                <span>新鲜度 {discussion.heat?.freshness ?? 0}</span>
+                <span>独立来源广度 {discussion.heat?.participation ?? 0}</span>
+                <b>{discussion.verificationState === "community-only" ? "待溯源" : "待交叉验证"}</b>
+              </div>
               <div className="discussion-read">
-                <span><small>RADAR READ</small>{discussion.signal.implication}</span>
+                <span><small>RADAR READ</small>{discussion.implication}</span>
                 <a href={discussion.href} target="_blank" rel="noreferrer"><span>打开社区原文 <span aria-hidden="true">↗</span></span><small>{new URL(discussion.href).hostname}</small><span className="sr-only">（在新窗口打开）</span></a>
               </div>
             </article>
@@ -104,7 +134,7 @@ export default async function DiscussionsPage() {
         <section className="discussion-empty" aria-live="polite">
           <span className="mono-label">WAITING FOR FIRST PULSE</span>
           <h2>等待下一次社区采集</h2>
-          <p>社区源已进入四小时采集链路。首条通过相关性、证据分层和工程分析的讨论会出现在这里。</p>
+          <p>社区源已进入每小时调度、按来源 cadence 采集的链路。首条通过相关性、证据分层和工程分析的讨论会出现在这里。</p>
         </section>
       )}
     </AppShell>

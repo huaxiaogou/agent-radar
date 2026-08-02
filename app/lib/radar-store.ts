@@ -49,6 +49,35 @@ function normalizedModelLandscape(snapshot: Partial<RadarSnapshot>): RadarSnapsh
   };
 }
 
+function normalizedSourceCoverage(status: RadarSnapshot["status"]): RadarSnapshot["status"]["sourceCoverage"] {
+  if (status.sourceCoverage?.total && status.sourceCoverage.byLayer && status.sourceCoverage.byFamily) {
+    return {
+      total: status.sourceCoverage.total,
+      byLayer: status.sourceCoverage.byLayer,
+      byFamily: status.sourceCoverage.byFamily,
+    };
+  }
+  return {
+    total: {
+      configured: Number(status.sourceCount || 0),
+      available: Number(status.availableSourceCount ?? (
+        Number(status.healthySourceCount || 0) + Number(status.degradedSourceCount || 0)
+      )),
+      effective: 0,
+    },
+    byLayer: {},
+    byFamily: {},
+  };
+}
+
+function normalizedSourceGroupCoverage(status: RadarSnapshot["status"]): RadarSnapshot["status"]["sourceGroupCoverage"] {
+  const legacyCoverage = status.sourceCoverage as RadarSnapshot["status"]["sourceCoverage"] & {
+    independentGroups?: RadarSnapshot["status"]["sourceGroupCoverage"];
+  };
+  const value = status.sourceGroupCoverage || legacyCoverage?.independentGroups;
+  return value || { configured: 0, available: 0, effective: 0 };
+}
+
 function unavailableRadarSnapshot(runStatus: RadarSnapshot["status"]["runStatus"]): RadarSnapshot {
   return {
     ...seedRadarSnapshot,
@@ -63,11 +92,14 @@ function unavailableRadarSnapshot(runStatus: RadarSnapshot["status"]["runStatus"
       healthySourceCount: 0,
       degradedSourceCount: 0,
       availableSourceCount: 0,
+      sourceCoverage: { total: { configured: 0, available: 0, effective: 0 }, byLayer: {}, byFamily: {} },
+      sourceGroupCoverage: { configured: 0, available: 0, effective: 0 },
       signalCount: 0,
       articleCount: 0,
       stale: true,
     },
     signals: [],
+    discussionPulses: [],
     candidateConcepts: [],
     modelPulses: [],
     sources: [],
@@ -89,6 +121,8 @@ export async function getRadarSnapshot(): Promise<RadarSnapshot> {
         runAnalysisMode: normalizedRunAnalysisMode(parsed.status),
         degradedSourceCount: Number(parsed.status.degradedSourceCount || 0),
         availableSourceCount: Number(parsed.status.availableSourceCount ?? parsed.status.healthySourceCount ?? 0),
+        sourceCoverage: normalizedSourceCoverage(parsed.status),
+        sourceGroupCoverage: normalizedSourceGroupCoverage(parsed.status),
         stale: !lastSuccessfulAt || Date.now() - lastSuccessfulAt > 12 * 60 * 60 * 1000,
       },
       concepts: parsed.concepts?.length ? parsed.concepts : seedRadarSnapshot.concepts,
@@ -96,6 +130,7 @@ export async function getRadarSnapshot(): Promise<RadarSnapshot> {
       playbooks: parsed.playbooks?.length ? parsed.playbooks : seedRadarSnapshot.playbooks,
       digests: parsed.digests || [],
       modelPulses: parsed.modelPulses || [],
+      discussionPulses: parsed.discussionPulses || [],
       candidateConcepts: parsed.candidateConcepts || [],
       modelLandscape: normalizedModelLandscape(parsed),
     };

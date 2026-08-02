@@ -4,6 +4,15 @@ export type EvidenceNode = {
 };
 
 export type SourceLayer = "official" | "practitioner" | "community";
+export type SourceFamily = "official" | "repository" | "practitioner" | "community" | "research";
+
+export type SignalHeat = {
+  engagement: number;
+  freshness: number;
+  velocity: number;
+  participation: number;
+  score: number;
+};
 
 export type SignalSource = {
   name: string;
@@ -12,6 +21,21 @@ export type SignalSource = {
   language?: "zh" | "en" | "mixed";
   originalTitle?: string;
   publishedAt?: string;
+  heat?: SignalHeat;
+};
+
+export type DiscussionPulse = {
+  sourceId: string;
+  sourceName: string;
+  href: string;
+  originalTitle: string;
+  summary: string;
+  implication: string;
+  language: "zh" | "en" | "mixed";
+  publishedAt?: string;
+  heat: SignalHeat;
+  verificationState: "community-only";
+  confidence: "待溯源";
 };
 
 export type Signal = {
@@ -36,6 +60,7 @@ export type Signal = {
   publishedAt?: string;
   discoveredAt?: string;
   analysisMode?: "curated" | "rules" | "openai" | "deepseek";
+  heat?: SignalHeat;
 };
 
 export type Concept = {
@@ -71,6 +96,8 @@ export type RadarSource = {
   lastError?: string | null;
   itemCount?: number;
   layer?: SourceLayer;
+  family?: SourceFamily;
+  independentGroup?: string;
   language?: "zh" | "en" | "mixed";
 };
 
@@ -136,6 +163,12 @@ export type RadarStatus = {
   healthySourceCount: number;
   degradedSourceCount: number;
   availableSourceCount: number;
+  sourceCoverage: {
+    total: { configured: number; available: number; effective: number };
+    byLayer: Partial<Record<SourceLayer, { configured: number; available: number; effective: number }>>;
+    byFamily: Partial<Record<SourceFamily, { configured: number; available: number; effective: number }>>;
+  };
+  sourceGroupCoverage: { configured: number; available: number; effective: number };
   signalCount: number;
   articleCount: number;
   stale: boolean;
@@ -174,6 +207,7 @@ export type RadarSnapshot = {
   version: 1;
   status: RadarStatus;
   signals: Signal[];
+  discussionPulses: DiscussionPulse[];
   concepts: Concept[];
   candidateConcepts: CandidateConcept[];
   sources: RadarSource[];
@@ -439,11 +473,18 @@ export const seedRadarSnapshot: RadarSnapshot = {
     healthySourceCount: sources.length,
     degradedSourceCount: 0,
     availableSourceCount: sources.length,
+    sourceCoverage: {
+      total: { configured: sources.length, available: sources.length, effective: 0 },
+      byLayer: {},
+      byFamily: {},
+    },
+    sourceGroupCoverage: { configured: 0, available: 0, effective: 0 },
     signalCount: signals.length,
     articleCount: signals.reduce((total, signal) => total + signal.evidenceCount, 0),
     stale: true,
   },
   signals,
+  discussionPulses: [],
   concepts,
   candidateConcepts: [],
   sources,

@@ -28,7 +28,15 @@ try {
   }
   const { runIngestion } = await import("../radar/pipeline.mjs");
   const result = await runIngestion({ trigger: triggerFromArgs() });
-  console.log(JSON.stringify({ service: "agent-radar", task: "ingest", ...result }, null, 2));
+  const snapshotStatus = { ...(result.snapshot || {}) };
+  delete snapshotStatus.signals;
+  delete snapshotStatus.discussionPulses;
+  console.log(JSON.stringify({
+    service: "agent-radar",
+    task: "ingest",
+    ...result,
+    snapshot: snapshotStatus,
+  }, null, 2));
 } finally {
   await releaseTaskLock(lockHandle);
 }

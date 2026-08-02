@@ -76,6 +76,7 @@ export function openDatabase() {
       focus TEXT NOT NULL,
       independent_group TEXT NOT NULL,
       source_layer TEXT,
+      source_family TEXT,
       language TEXT,
       active INTEGER NOT NULL DEFAULT 1,
       last_attempt_at TEXT,
@@ -138,6 +139,7 @@ export function openDatabase() {
     CREATE INDEX IF NOT EXISTS articles_concept_idx ON articles(concept_slug);
   `);
   ensureColumn(database, "source_health", "source_layer", "TEXT");
+  ensureColumn(database, "source_health", "source_family", "TEXT");
   ensureColumn(database, "source_health", "language", "TEXT");
   ensureColumn(database, "source_health", "active", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(database, "articles", "source_layer", "TEXT");
@@ -165,8 +167,8 @@ export function upsertSourceCatalog(database, sources) {
   const statement = database.prepare(`
     INSERT INTO source_health (
       source_id, name, homepage, source_class, priority, cadence, focus, independent_group,
-      source_layer, language, active
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      source_layer, source_family, language, active
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     ON CONFLICT(source_id) DO UPDATE SET
       name = excluded.name,
       homepage = excluded.homepage,
@@ -176,6 +178,7 @@ export function upsertSourceCatalog(database, sources) {
       focus = excluded.focus,
       independent_group = excluded.independent_group,
       source_layer = excluded.source_layer,
+      source_family = excluded.source_family,
       language = excluded.language,
       active = 1
   `);
@@ -193,6 +196,7 @@ export function upsertSourceCatalog(database, sources) {
         source.focus,
         source.independentGroup,
         source.layer || null,
+        source.family || null,
         source.language || null,
       );
     }
@@ -407,6 +411,16 @@ export function getRecentArticles(database, limit = 240) {
   return database.prepare(`
     SELECT * FROM articles
     WHERE publish_decision = 'publish'
+    ORDER BY COALESCE(published_at, discovered_at) DESC
+    LIMIT ?
+  `).all(limit);
+}
+
+export function getRecentCommunityWatchArticles(database, limit = 160) {
+  return database.prepare(`
+    SELECT * FROM articles
+    WHERE publish_decision = 'watch'
+      AND source_layer = 'community'
     ORDER BY COALESCE(published_at, discovered_at) DESC
     LIMIT ?
   `).all(limit);

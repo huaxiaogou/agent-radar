@@ -1,6 +1,7 @@
 [
   {
     "id": "anthropic-engineering",
+    "family": "official",
     "name": "Anthropic Engineering",
     "kind": "html",
     "url": "https://www.anthropic.com/engineering",
@@ -18,6 +19,7 @@
   },
   {
     "id": "openai-news",
+    "family": "official",
     "name": "OpenAI News",
     "kind": "feed",
     "url": "https://openai.com/news/rss.xml",
@@ -34,6 +36,7 @@
   },
   {
     "id": "openai-codex-releases",
+    "family": "repository",
     "name": "OpenAI Codex Releases",
     "kind": "feed",
     "url": "https://github.com/openai/codex/releases.atom",
@@ -51,6 +54,7 @@
   },
   {
     "id": "claude-code-changelog",
+    "family": "official",
     "name": "Claude Code Changelog",
     "kind": "html",
     "url": "https://code.claude.com/docs/en/changelog",
@@ -75,6 +79,7 @@
   },
   {
     "id": "claude-code-releases",
+    "family": "repository",
     "name": "Claude Code Releases",
     "kind": "feed",
     "url": "https://github.com/anthropics/claude-code/releases.atom",
@@ -92,6 +97,7 @@
   },
   {
     "id": "github-changelog",
+    "family": "official",
     "name": "GitHub Changelog",
     "kind": "feed",
     "url": "https://github.blog/changelog/feed/",
@@ -108,6 +114,7 @@
   },
   {
     "id": "microsoft-agent-framework",
+    "family": "official",
     "name": "Microsoft Agent Framework",
     "kind": "feed",
     "url": "https://devblogs.microsoft.com/agent-framework/feed/",
@@ -125,6 +132,7 @@
   },
   {
     "id": "microsoft-agent-framework-releases",
+    "family": "repository",
     "name": "Agent Framework Releases",
     "kind": "feed",
     "url": "https://github.com/microsoft/agent-framework/releases.atom",
@@ -142,6 +150,7 @@
   },
   {
     "id": "autogen-releases",
+    "family": "repository",
     "name": "AutoGen Releases",
     "kind": "feed",
     "url": "https://github.com/microsoft/autogen/releases.atom",
@@ -159,6 +168,7 @@
   },
   {
     "id": "langgraph-releases",
+    "family": "repository",
     "name": "LangGraph Releases",
     "kind": "feed",
     "url": "https://github.com/langchain-ai/langgraph/releases.atom",
@@ -176,6 +186,7 @@
   },
   {
     "id": "mcp-spec-releases",
+    "family": "repository",
     "name": "MCP Specification Releases",
     "kind": "feed",
     "url": "https://github.com/modelcontextprotocol/specification/releases.atom",
@@ -193,6 +204,7 @@
   },
   {
     "id": "mcp-blog",
+    "family": "official",
     "name": "MCP Blog",
     "kind": "html",
     "url": "https://blog.modelcontextprotocol.io/",
@@ -211,6 +223,7 @@
   },
   {
     "id": "latent-space",
+    "family": "practitioner",
     "name": "Latent Space",
     "kind": "feed",
     "url": "https://www.latent.space/feed",
@@ -227,6 +240,7 @@
   },
   {
     "id": "simon-willison-agentic",
+    "family": "practitioner",
     "name": "Simon Willison · Agentic Engineering",
     "kind": "html",
     "url": "https://feeds.simonwillison.net/tags/agentic-engineering/",
@@ -245,6 +259,7 @@
   },
   {
     "id": "addy-osmani",
+    "family": "practitioner",
     "name": "Addy Osmani",
     "kind": "feed",
     "url": "https://addyosmani.com/rss.xml",
@@ -261,6 +276,7 @@
   },
   {
     "id": "google-antigravity",
+    "family": "official",
     "name": "Google Antigravity",
     "kind": "html",
     "url": "https://www.antigravity.google/blog",
@@ -287,6 +303,7 @@
   },
   {
     "id": "openai-agents-python-releases",
+    "family": "repository",
     "name": "OpenAI Agents SDK Releases",
     "kind": "feed",
     "url": "https://github.com/openai/openai-agents-python/releases.atom",
@@ -304,6 +321,7 @@
   },
   {
     "id": "google-adk-releases",
+    "family": "repository",
     "name": "Google Agent Development Kit Releases",
     "kind": "feed",
     "url": "https://github.com/google/adk-python/releases.atom",
@@ -321,6 +339,7 @@
   },
   {
     "id": "gemini-cli-releases",
+    "family": "repository",
     "name": "Gemini CLI Releases",
     "kind": "feed",
     "url": "https://github.com/google-gemini/gemini-cli/releases.atom",
@@ -338,6 +357,7 @@
   },
   {
     "id": "pydantic-ai-releases",
+    "family": "repository",
     "name": "Pydantic AI Releases",
     "kind": "feed",
     "url": "https://github.com/pydantic/pydantic-ai/releases.atom",
@@ -355,6 +375,7 @@
   },
   {
     "id": "qwen-agent-releases",
+    "family": "repository",
     "name": "Qwen-Agent Releases",
     "kind": "feed",
     "url": "https://github.com/QwenLM/Qwen-Agent/releases.atom",
@@ -372,6 +393,7 @@
   },
   {
     "id": "agentscope-releases",
+    "family": "repository",
     "name": "AgentScope Releases",
     "kind": "feed",
     "url": "https://github.com/agentscope-ai/agentscope/releases.atom",
@@ -389,6 +411,7 @@
   },
   {
     "id": "metagpt-releases",
+    "family": "repository",
     "name": "MetaGPT Releases",
     "kind": "feed",
     "url": "https://github.com/FoundationAgents/MetaGPT/releases.atom",
@@ -406,6 +429,7 @@
   },
   {
     "id": "kimi-cli-releases",
+    "family": "repository",
     "name": "Kimi CLI Releases",
     "kind": "feed",
     "url": "https://github.com/MoonshotAI/kimi-cli/releases.atom",
@@ -423,6 +447,7 @@
   },
   {
     "id": "baoyu-practice",
+    "family": "practitioner",
     "name": "宝玉的工程实践",
     "kind": "feed",
     "url": "https://baoyu.io/feed.xml",
@@ -439,6 +464,7 @@
   },
   {
     "id": "v2ex-programmer",
+    "family": "community",
     "name": "V2EX · 程序员",
     "kind": "feed",
     "url": "https://www.v2ex.com/feed/programmer.xml",
@@ -461,6 +487,7 @@
   },
   {
     "id": "v2ex-tech",
+    "family": "community",
     "name": "V2EX · 科技",
     "kind": "feed",
     "url": "https://www.v2ex.com/feed/tech.xml",
@@ -483,6 +510,7 @@
   },
   {
     "id": "linux-do-ai",
+    "family": "community",
     "name": "Linux.do · AI",
     "kind": "feed",
     "url": "https://linux.do/tag/ai.rss",
@@ -495,11 +523,11 @@
     "focus": "中文 Agent · AI Coding · 开源工程讨论",
     "independentGroup": "linux-do",
     "maxItems": 16,
-    "enabled": false,
-    "disabledReason": "公开 RSS 当前被 Cloudflare challenge 拦截；不绕过访问控制，待公开入口恢复后再启用"
+    "enabled": true
   },
   {
     "id": "hacker-news-agentic",
+    "family": "community",
     "name": "Hacker News · Agentic Engineering",
     "kind": "json",
     "parser": "hacker-news",
@@ -517,6 +545,7 @@
   },
   {
     "id": "bluesky-agentic",
+    "family": "community",
     "name": "Bluesky · Agentic Engineering",
     "kind": "json",
     "parser": "bluesky-search",
@@ -534,6 +563,7 @@
   },
   {
     "id": "lobsters-ai",
+    "family": "community",
     "name": "Lobsters · AI",
     "kind": "feed",
     "url": "https://lobste.rs/t/ai.rss",
@@ -550,6 +580,7 @@
   },
   {
     "id": "reddit-local-llama",
+    "family": "community",
     "name": "Reddit · LocalLLaMA",
     "kind": "feed",
     "url": "https://www.reddit.com/r/LocalLLaMA/.rss?raw_json=1",
@@ -560,12 +591,13 @@
     "priority": "P2",
     "cadence": "8h",
     "focus": "Local coding agents · Agent runtimes · Open-source tools",
-    "independentGroup": "reddit-local-llama",
+    "independentGroup": "reddit",
     "maxItems": 14,
     "enabled": true
   },
   {
     "id": "github-agents-discussions",
+    "family": "community",
     "name": "GitHub · OpenAI Agents Discussions",
     "kind": "html",
     "url": "https://github.com/openai/openai-agents-python/issues?q=is%3Aissue+sort%3Aupdated-desc",
@@ -576,13 +608,14 @@
     "priority": "P2",
     "cadence": "12h",
     "focus": "Agent SDK usage · Production issues · Engineering feedback",
-    "independentGroup": "github-community",
+    "independentGroup": "openai",
     "maxItems": 12,
     "includeUrlPatterns": ["^https://github\\.com/openai/openai-agents-python/issues/\\d+$"],
     "enabled": true
   },
   {
     "id": "hugging-face-blog",
+    "family": "official",
     "name": "Hugging Face Blog",
     "kind": "feed",
     "url": "https://huggingface.co/blog/feed.xml",
@@ -605,6 +638,7 @@
   },
   {
     "id": "arxiv-coding-agents",
+    "family": "research",
     "name": "arXiv · Coding Agents",
     "kind": "feed",
     "url": "https://export.arxiv.org/api/query?search_query=all%3A%22coding%20agent%22%20OR%20all%3A%22agentic%20coding%22&start=0&max_results=20&sortBy=submittedDate&sortOrder=descending",
@@ -621,6 +655,7 @@
   },
   {
     "id": "venturebeat-ai",
+    "family": "practitioner",
     "name": "VentureBeat AI",
     "kind": "feed",
     "url": "https://venturebeat.com/category/ai/feed/",
@@ -637,6 +672,7 @@
   },
   {
     "id": "mit-tech-review-ai",
+    "family": "practitioner",
     "name": "MIT Technology Review · AI",
     "kind": "feed",
     "url": "https://www.technologyreview.com/topic/artificial-intelligence/feed",
@@ -653,6 +689,7 @@
   },
   {
     "id": "the-decoder",
+    "family": "practitioner",
     "name": "The Decoder",
     "kind": "feed",
     "url": "https://the-decoder.com/feed/",
@@ -669,6 +706,7 @@
   },
   {
     "id": "import-ai",
+    "family": "practitioner",
     "name": "Import AI",
     "kind": "feed",
     "url": "https://jack-clark.net/feed/",
@@ -685,6 +723,7 @@
   },
   {
     "id": "qbitai",
+    "family": "practitioner",
     "name": "量子位",
     "kind": "feed",
     "url": "https://www.qbitai.com/feed",
@@ -698,5 +737,240 @@
     "independentGroup": "qbitai",
     "maxItems": 14,
     "enabled": true
+  },
+  {
+    "id": "google-deepmind-blog", "family": "official", "name": "Google DeepMind Blog", "kind": "feed",
+    "url": "https://deepmind.google/blog/rss.xml", "homepage": "https://deepmind.google/blog/", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P1", "cadence": "4h", "focus": "Agent research · Gemini · Tool use", "independentGroup": "google", "maxItems": 12, "enabled": true
+  },
+  {
+    "id": "microsoft-ai-blog", "family": "official", "name": "Microsoft AI Blog", "kind": "feed",
+    "url": "https://news.microsoft.com/source/topics/ai/feed/", "homepage": "https://news.microsoft.com/source/topics/ai/", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P1", "cadence": "8h", "focus": "Copilot · Agents · Enterprise AI engineering", "independentGroup": "microsoft", "maxItems": 12, "enabled": true
+  },
+  {
+    "id": "aws-machine-learning-blog", "family": "official", "name": "AWS Machine Learning Blog", "kind": "feed",
+    "url": "https://aws.amazon.com/blogs/machine-learning/feed/", "homepage": "https://aws.amazon.com/blogs/machine-learning/", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P2", "cadence": "8h", "focus": "Bedrock Agents · Production patterns · Evaluation", "independentGroup": "aws", "maxItems": 12, "enabled": true
+  },
+  {
+    "id": "nvidia-developer-ai", "family": "official", "name": "NVIDIA Developer Blog", "kind": "feed",
+    "url": "https://developer.nvidia.com/blog/feed/", "homepage": "https://developer.nvidia.com/blog/", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P2", "cadence": "12h", "focus": "Agent runtimes · Inference · Developer tooling", "independentGroup": "nvidia", "maxItems": 12, "enabled": true
+  },
+  {
+    "id": "cloudflare-ai-blog", "family": "official", "name": "Cloudflare AI Blog", "kind": "feed",
+    "url": "https://blog.cloudflare.com/tag/ai/rss/", "homepage": "https://blog.cloudflare.com/tag/ai/", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P2", "cadence": "12h", "focus": "AI Gateway · Agents · Sandbox · Edge runtime", "independentGroup": "cloudflare", "maxItems": 12, "enabled": true
+  },
+  {
+    "id": "jetbrains-ai-blog", "family": "official", "name": "JetBrains AI Blog", "kind": "feed",
+    "url": "https://blog.jetbrains.com/ai/feed/", "homepage": "https://blog.jetbrains.com/ai/", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P2", "cadence": "12h", "focus": "Junie · IDE agents · Developer workflow", "independentGroup": "jetbrains", "maxItems": 12, "enabled": true
+  },
+  {
+    "id": "langchain-blog", "family": "official", "name": "LangChain Blog", "kind": "feed",
+    "url": "https://www.langchain.com/blog/rss.xml", "homepage": "https://www.langchain.com/blog", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P1", "cadence": "4h", "focus": "LangGraph · Agent engineering · Evaluation", "independentGroup": "langchain", "maxItems": 14, "enabled": true
+  },
+  {
+    "id": "llamaindex-blog", "family": "official", "name": "LlamaIndex Blog", "kind": "html",
+    "url": "https://www.llamaindex.ai/blog", "homepage": "https://www.llamaindex.ai/blog", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P1", "cadence": "8h", "focus": "LlamaIndex · Data agents · Agent workflows", "independentGroup": "llamaindex", "maxItems": 12, "includeUrlPatterns": ["^https://www\\.llamaindex\\.ai/blog/(?!archive(?:/|$)|categor(?:y|ies)(?:/|$)|tags?(?:/|$)|signup(?:/|$))[^?#]+$"], "enabled": true
+  },
+  {
+    "id": "cursor-changelog", "family": "official", "name": "Cursor Changelog", "kind": "html",
+    "url": "https://cursor.com/changelog", "homepage": "https://cursor.com/changelog", "class": "更新日志", "layer": "official", "language": "en",
+    "priority": "P0", "cadence": "1h", "focus": "Cursor agents · IDE · Background coding", "independentGroup": "cursor", "maxItems": 14, "includeUrlPatterns": ["^https://cursor\\.com/changelog/(?!archive(?:/|$)|categor(?:y|ies)(?:/|$)|tags?(?:/|$)|signup(?:/|$))[^?#]+$"], "alwaysRelevant": true, "enabled": true
+  },
+  {
+    "id": "cline-blog", "family": "official", "name": "Cline Blog", "kind": "html",
+    "url": "https://cline.bot/blog", "homepage": "https://cline.bot/blog", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P1", "cadence": "4h", "focus": "Cline coding agent · Tools · MCP", "independentGroup": "cline", "maxItems": 12, "includeUrlPatterns": ["^https://cline\\.bot/blog/(?!archive(?:/|$)|categor(?:y|ies)(?:/|$)|tags?(?:/|$)|signup(?:/|$))[^?#]+$"], "enabled": true
+  },
+  {
+    "id": "roo-code-updates", "family": "official", "name": "Roo Code Update Notes", "kind": "html",
+    "url": "https://docs.roocode.com/update-notes/", "homepage": "https://docs.roocode.com/update-notes/", "class": "更新日志", "layer": "official", "language": "en",
+    "priority": "P1", "cadence": "4h", "focus": "Roo Code · Agent modes · Tool workflows", "independentGroup": "roo-code", "maxItems": 12, "alwaysRelevant": true, "enabled": true
+  },
+  {
+    "id": "continue-blog", "family": "official", "name": "Continue Blog", "kind": "html",
+    "url": "https://blog.continue.dev/", "homepage": "https://blog.continue.dev/", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P1", "cadence": "8h", "focus": "Continue · Open coding agents · Context", "independentGroup": "continue", "maxItems": 12, "includeUrlPatterns": ["^https://blog\\.continue\\.dev/(?!archive(?:/|$)|categor(?:y|ies)(?:/|$)|tags?(?:/|$)|signup(?:/|$))[^?#]+$"], "enabled": true
+  },
+  {
+    "id": "aider-blog", "family": "official", "name": "Aider Blog", "kind": "html",
+    "url": "https://aider.chat/blog/", "homepage": "https://aider.chat/blog/", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P1", "cadence": "8h", "focus": "Aider · Coding agent workflow · Repository maps", "independentGroup": "aider", "maxItems": 12, "includeUrlPatterns": ["^https://aider\\.chat/blog/(?!archive(?:/|$)|categor(?:y|ies)(?:/|$)|tags?(?:/|$)|signup(?:/|$))[^?#]+$", "^https://aider\\.chat/20\\d{2}/\\d{2}/\\d{2}/[^/?#]+\\.html$"], "enabled": true
+  },
+  {
+    "id": "openhands-blog", "family": "official", "name": "OpenHands Blog", "kind": "html",
+    "url": "https://www.openhands.dev/blog", "homepage": "https://www.openhands.dev/blog", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P1", "cadence": "8h", "focus": "OpenHands · Software agents · Evaluation", "independentGroup": "openhands", "maxItems": 12, "includeUrlPatterns": ["^https://www\\.openhands\\.dev/blog/(?!archive(?:/|$)|categor(?:y|ies)(?:/|$)|tags?(?:/|$)|signup(?:/|$))[^?#]+$"], "enabled": true
+  },
+  {
+    "id": "crewai-changelog", "family": "official", "name": "CrewAI Blog", "kind": "html",
+    "url": "https://crewai.com/blog", "homepage": "https://crewai.com/blog", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P1", "cadence": "4h", "focus": "CrewAI · Multi-agent orchestration · Enterprise", "independentGroup": "crewai", "maxItems": 12, "includeUrlPatterns": ["^https://(?:www\\.)?crewai\\.com/blog/(?!archive(?:/|$)|categor(?:y|ies)(?:/|$)|tags?(?:/|$)|signup(?:/|$))[^?#]+$"], "enabled": true
+  },
+  {
+    "id": "dify-blog", "family": "official", "name": "Dify Blog", "kind": "html",
+    "url": "https://dify.ai/blog", "homepage": "https://dify.ai/blog", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P1", "cadence": "8h", "focus": "Dify · Agent workflows · LLMOps", "independentGroup": "dify", "maxItems": 12, "includeUrlPatterns": ["^https://dify\\.ai/blog/(?!archive(?:/|$)|categor(?:y|ies)(?:/|$)|tags?(?:/|$)|signup(?:/|$))[^?#]+$"], "enabled": true
+  },
+  {
+    "id": "mastra-blog", "family": "official", "name": "Mastra Blog", "kind": "html",
+    "url": "https://mastra.ai/blog", "homepage": "https://mastra.ai/blog", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P1", "cadence": "8h", "focus": "Mastra · TypeScript agents · Workflows", "independentGroup": "mastra", "maxItems": 12, "includeUrlPatterns": ["^https://mastra\\.ai/blog/(?!archive(?:/|$)|categor(?:y|ies)(?:/|$)|tags?(?:/|$)|signup(?:/|$))[^?#]+$"], "enabled": true
+  },
+  {
+    "id": "vercel-ai-blog", "family": "official", "name": "Vercel AI", "kind": "feed",
+    "url": "https://vercel.com/atom", "homepage": "https://vercel.com/blog", "class": "官方团队", "layer": "official", "language": "en",
+    "priority": "P2", "cadence": "12h", "focus": "AI SDK · Agents · Tool calling", "independentGroup": "vercel", "maxItems": 12, "enabled": true
+  },
+  {
+    "id": "qwen-official-blog", "family": "official", "name": "Qwen Official Blog", "kind": "html",
+    "url": "https://qwenlm.github.io/blog/", "homepage": "https://qwenlm.github.io/blog/", "class": "中文官方", "layer": "official", "language": "mixed",
+    "priority": "P1", "cadence": "8h", "focus": "Qwen · Qwen-Agent · Tool use", "independentGroup": "qwen", "maxItems": 12, "includeUrlPatterns": ["^https://qwenlm\\.github\\.io/blog/(?!archive(?:/|$)|categor(?:y|ies)(?:/|$)|tags?(?:/|$)|signup(?:/|$))[^?#]+$"], "enabled": true
+  },
+  {
+    "id": "cline-releases", "family": "repository", "name": "Cline Releases", "kind": "feed", "url": "https://github.com/cline/cline/releases.atom", "homepage": "https://github.com/cline/cline/releases",
+    "class": "工程仓库", "layer": "official", "language": "en", "priority": "P0", "cadence": "2h", "focus": "Cline coding agent releases", "independentGroup": "cline", "maxItems": 12, "alwaysRelevant": true, "enabled": true
+  },
+  {
+    "id": "roo-code-releases", "family": "repository", "name": "Roo Code Releases", "kind": "feed", "url": "https://github.com/RooVetGit/Roo-Code/releases.atom", "homepage": "https://github.com/RooVetGit/Roo-Code/releases",
+    "class": "工程仓库", "layer": "official", "language": "en", "priority": "P0", "cadence": "2h", "focus": "Roo Code agent releases", "independentGroup": "roo-code", "maxItems": 12, "alwaysRelevant": true, "enabled": true
+  },
+  {
+    "id": "continue-releases", "family": "repository", "name": "Continue Releases", "kind": "feed", "url": "https://github.com/continuedev/continue/releases.atom", "homepage": "https://github.com/continuedev/continue/releases",
+    "class": "工程仓库", "layer": "official", "language": "en", "priority": "P1", "cadence": "4h", "focus": "Continue coding agent releases", "independentGroup": "continue", "maxItems": 12, "alwaysRelevant": true, "enabled": true
+  },
+  {
+    "id": "aider-releases", "family": "repository", "name": "Aider Releases", "kind": "feed", "url": "https://github.com/Aider-AI/aider/releases.atom", "homepage": "https://github.com/Aider-AI/aider/releases",
+    "class": "工程仓库", "layer": "official", "language": "en", "priority": "P1", "cadence": "4h", "focus": "Aider coding agent releases", "independentGroup": "aider", "maxItems": 12, "alwaysRelevant": true, "enabled": true
+  },
+  {
+    "id": "openhands-releases", "family": "repository", "name": "OpenHands Releases", "kind": "feed", "url": "https://github.com/All-Hands-AI/OpenHands/releases.atom", "homepage": "https://github.com/All-Hands-AI/OpenHands/releases",
+    "class": "工程仓库", "layer": "official", "language": "en", "priority": "P1", "cadence": "4h", "focus": "OpenHands software agent releases", "independentGroup": "openhands", "maxItems": 12, "alwaysRelevant": true, "enabled": true
+  },
+  {
+    "id": "crewai-releases", "family": "repository", "name": "CrewAI Releases", "kind": "feed", "url": "https://github.com/crewAIInc/crewAI/releases.atom", "homepage": "https://github.com/crewAIInc/crewAI/releases",
+    "class": "工程仓库", "layer": "official", "language": "en", "priority": "P1", "cadence": "4h", "focus": "CrewAI multi-agent releases", "independentGroup": "crewai", "maxItems": 12, "alwaysRelevant": true, "enabled": true
+  },
+  {
+    "id": "smolagents-releases", "family": "repository", "name": "smolagents Releases", "kind": "feed", "url": "https://github.com/huggingface/smolagents/releases.atom", "homepage": "https://github.com/huggingface/smolagents/releases",
+    "class": "工程仓库", "layer": "official", "language": "en", "priority": "P1", "cadence": "4h", "focus": "smolagents tool-use agent releases", "independentGroup": "hugging-face", "maxItems": 12, "alwaysRelevant": true, "enabled": true
+  },
+  {
+    "id": "llamaindex-releases", "family": "repository", "name": "LlamaIndex Releases", "kind": "feed", "url": "https://github.com/run-llama/llama_index/releases.atom", "homepage": "https://github.com/run-llama/llama_index/releases",
+    "class": "工程仓库", "layer": "official", "language": "en", "priority": "P1", "cadence": "4h", "focus": "LlamaIndex agents and workflows releases", "independentGroup": "llamaindex", "maxItems": 12, "alwaysRelevant": true, "enabled": true
+  },
+  {
+    "id": "dify-releases", "family": "repository", "name": "Dify Releases", "kind": "feed", "url": "https://github.com/langgenius/dify/releases.atom", "homepage": "https://github.com/langgenius/dify/releases",
+    "class": "工程仓库", "layer": "official", "language": "mixed", "priority": "P1", "cadence": "4h", "focus": "Dify agent workflow releases", "independentGroup": "dify", "maxItems": 12, "alwaysRelevant": true, "enabled": true
+  },
+  {
+    "id": "mastra-releases", "family": "repository", "name": "Mastra Releases", "kind": "feed", "url": "https://github.com/mastra-ai/mastra/releases.atom", "homepage": "https://github.com/mastra-ai/mastra/releases",
+    "class": "工程仓库", "layer": "official", "language": "en", "priority": "P1", "cadence": "4h", "focus": "Mastra TypeScript agent releases", "independentGroup": "mastra", "maxItems": 12, "alwaysRelevant": true, "enabled": true
+  },
+  {
+    "id": "cline-issues", "family": "repository", "name": "Cline Public Issues", "kind": "json", "parser": "github-issues", "url": "https://api.github.com/repos/cline/cline/issues?state=open&sort=updated&direction=desc&per_page=20", "homepage": "https://github.com/cline/cline/issues",
+    "fallbacks": [
+      {
+        "kind": "html",
+        "url": "https://github.com/cline/cline/issues",
+        "discoveryHomepage": "https://github.com/cline/cline/issues",
+        "includeUrlPatterns": ["^https://github\\.com/cline/cline/issues/\\d+$"]
+      }
+    ],
+    "class": "工程仓库讨论", "layer": "community", "language": "en", "priority": "P2", "cadence": "12h", "focus": "Cline failures · Tool issues · User evidence", "independentGroup": "cline", "maxItems": 16, "enabled": true
+  },
+  {
+    "id": "openhands-issues", "family": "repository", "name": "OpenHands Public Issues", "kind": "json", "parser": "github-issues", "url": "https://api.github.com/repos/OpenHands/OpenHands/issues?state=open&sort=updated&direction=desc&per_page=20", "homepage": "https://github.com/OpenHands/OpenHands/issues",
+    "fallbacks": [
+      {
+        "kind": "html",
+        "url": "https://github.com/OpenHands/OpenHands/issues",
+        "discoveryHomepage": "https://github.com/OpenHands/OpenHands/issues",
+        "includeUrlPatterns": ["^https://github\\.com/OpenHands/OpenHands/issues/\\d+$"]
+      }
+    ],
+    "class": "工程仓库讨论", "layer": "community", "language": "en", "priority": "P2", "cadence": "12h", "focus": "OpenHands failures · Evaluation · User evidence", "independentGroup": "openhands", "maxItems": 16, "enabled": true
+  },
+  {
+    "id": "chip-huyen-blog", "family": "practitioner", "name": "Chip Huyen", "kind": "feed", "url": "https://huyenchip.com/feed.xml", "homepage": "https://huyenchip.com/",
+    "class": "实践者", "layer": "practitioner", "language": "en", "priority": "P2", "cadence": "24h", "focus": "AI engineering · Agents · Production systems", "independentGroup": "chip-huyen", "maxItems": 10, "enabled": true
+  },
+  {
+    "id": "eugene-yan-blog", "family": "practitioner", "name": "Eugene Yan", "kind": "feed", "url": "https://eugeneyan.com/rss/", "homepage": "https://eugeneyan.com/",
+    "class": "实践者", "layer": "practitioner", "language": "en", "priority": "P2", "cadence": "24h", "focus": "Applied AI · Agent patterns · Evaluation", "independentGroup": "eugene-yan", "maxItems": 10, "enabled": true
+  },
+  {
+    "id": "one-useful-thing", "family": "practitioner", "name": "One Useful Thing", "kind": "feed", "url": "https://www.oneusefulthing.org/feed", "homepage": "https://www.oneusefulthing.org/",
+    "class": "实践者", "layer": "practitioner", "language": "en", "priority": "P2", "cadence": "24h", "focus": "AI work practices · Agent adoption · Human workflow", "independentGroup": "one-useful-thing", "maxItems": 10, "enabled": true
+  },
+  {
+    "id": "reddit-claudeai", "family": "community", "name": "Reddit · ClaudeAI", "kind": "feed", "url": "https://www.reddit.com/r/ClaudeAI/.rss?raw_json=1", "homepage": "https://www.reddit.com/r/ClaudeAI/",
+    "class": "英文社区", "layer": "community", "language": "en", "priority": "P2", "cadence": "8h", "focus": "Claude Code · Agent workflows · User failures", "independentGroup": "reddit", "maxItems": 14, "enabled": true
+  },
+  {
+    "id": "reddit-cursor", "family": "community", "name": "Reddit · Cursor", "kind": "feed", "url": "https://www.reddit.com/r/cursor/.rss?raw_json=1", "homepage": "https://www.reddit.com/r/cursor/",
+    "class": "英文社区", "layer": "community", "language": "en", "priority": "P2", "cadence": "8h", "focus": "Cursor agents · IDE workflow · User failures", "independentGroup": "reddit", "maxItems": 14, "enabled": true
+  },
+  {
+    "id": "reddit-chatgpt-coding", "family": "community", "name": "Reddit · ChatGPTCoding", "kind": "feed", "url": "https://www.reddit.com/r/ChatGPTCoding/.rss?raw_json=1", "homepage": "https://www.reddit.com/r/ChatGPTCoding/",
+    "class": "英文社区", "layer": "community", "language": "en", "priority": "P2", "cadence": "12h", "focus": "AI coding · Coding agents · User practice", "independentGroup": "reddit", "maxItems": 14, "enabled": true
+  },
+  {
+    "id": "hacker-news-coding-agents", "family": "community", "name": "Hacker News · Coding Agents", "kind": "json", "parser": "hacker-news", "url": "https://hn.algolia.com/api/v1/search_by_date?query=coding%20agent&tags=story&hitsPerPage=25", "homepage": "https://news.ycombinator.com/",
+    "class": "英文社区", "layer": "community", "language": "en", "priority": "P2", "cadence": "2h", "focus": "Coding agent launches · Engineering discussion", "independentGroup": "hacker-news", "maxItems": 18, "enabled": true
+  },
+  {
+    "id": "bluesky-multi-agent", "family": "community", "name": "Bluesky · Multi-agent", "kind": "json", "parser": "bluesky-search", "url": "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=multi-agent%20engineering&limit=25", "homepage": "https://bsky.app/",
+    "class": "英文社区", "layer": "community", "language": "en", "priority": "P2", "cadence": "4h", "focus": "Multi-agent engineering · Emerging practitioner terms", "independentGroup": "bluesky", "maxItems": 18, "enabled": true
+  },
+  {
+    "id": "hugging-face-daily-papers", "family": "research", "name": "Hugging Face Daily Papers", "kind": "json", "parser": "huggingface-daily-papers", "url": "https://huggingface.co/api/daily_papers", "homepage": "https://huggingface.co/papers",
+    "class": "研究发现", "layer": "practitioner", "language": "en", "priority": "P1", "cadence": "4h", "focus": "Daily Papers · Coding agents · Tool use research", "independentGroup": "hugging-face-papers", "maxItems": 20, "enabled": true
+  },
+  {
+    "id": "dblp-agentic-coding", "family": "research", "name": "DBLP · Agentic Coding Research", "kind": "json", "parser": "dblp-publications", "url": "https://dblp.org/search/publ/api?q=agentic%20coding&format=json&h=25", "homepage": "https://dblp.org/search?q=agentic%20coding",
+    "class": "研究发现", "layer": "practitioner", "language": "en", "priority": "P1", "cadence": "8h", "focus": "DBLP · Agentic coding · Software agents", "independentGroup": "dblp", "maxItems": 20, "enabled": true
+  },
+  {
+    "id": "openreview-agent-research", "family": "research", "name": "OpenReview · Agent Research（停用）", "kind": "json", "parser": "openreview-notes", "url": "https://api2.openreview.net/notes?content.title=agent&limit=25", "homepage": "https://openreview.net/",
+    "class": "研究发现", "layer": "practitioner", "language": "en", "priority": "P2", "cadence": "24h", "focus": "OpenReview 旧入口 · 返回 challenge，保留停用记录", "independentGroup": "openreview", "maxItems": 20, "enabled": false
+  },
+  {
+    "id": "arxiv-software-agents", "family": "research", "name": "arXiv · Software Engineering Agents", "kind": "feed", "url": "https://export.arxiv.org/api/query?search_query=all%3A%22software%20engineering%20agent%22&start=0&max_results=20&sortBy=submittedDate&sortOrder=descending", "homepage": "https://arxiv.org/",
+    "class": "研究发现", "layer": "practitioner", "language": "en", "priority": "P1", "cadence": "8h", "focus": "Software engineering agents · Benchmarks · Reliability", "independentGroup": "arxiv", "maxItems": 20, "enabled": true
+  },
+  {
+    "id": "arxiv-multi-agent", "family": "research", "name": "arXiv · Multi-agent Systems", "kind": "feed", "url": "https://export.arxiv.org/api/query?search_query=all%3A%22multi-agent%20orchestration%22&start=0&max_results=20&sortBy=submittedDate&sortOrder=descending", "homepage": "https://arxiv.org/",
+    "class": "研究发现", "layer": "practitioner", "language": "en", "priority": "P2", "cadence": "12h", "focus": "Multi-agent orchestration · Coordination · Evaluation", "independentGroup": "arxiv", "maxItems": 20, "enabled": true
+  },
+  {
+    "id": "arxiv-agent-tool-use", "family": "research", "name": "arXiv · Agent Tool Use", "kind": "feed", "url": "https://export.arxiv.org/api/query?search_query=all%3A%22agent%20tool%20use%22&start=0&max_results=20&sortBy=submittedDate&sortOrder=descending", "homepage": "https://arxiv.org/",
+    "class": "研究发现", "layer": "practitioner", "language": "en", "priority": "P2", "cadence": "12h", "focus": "Tool use · Function calling · Agent reliability", "independentGroup": "arxiv", "maxItems": 20, "enabled": true
+  },
+  {
+    "id": "arxiv-agent-evaluation", "family": "research", "name": "arXiv · Agent Evaluation", "kind": "feed", "url": "https://export.arxiv.org/api/query?search_query=all%3A%22agent%20evaluation%22&start=0&max_results=20&sortBy=submittedDate&sortOrder=descending", "homepage": "https://arxiv.org/",
+    "class": "研究发现", "layer": "practitioner", "language": "en", "priority": "P2", "cadence": "12h", "focus": "Agent evaluation · Evals · Reproducibility", "independentGroup": "arxiv", "maxItems": 20, "enabled": true
+  },
+  {
+    "id": "arxiv-context-engineering", "family": "research", "name": "arXiv · Context Engineering", "kind": "feed", "url": "https://export.arxiv.org/api/query?search_query=all%3A%22context%20engineering%22&start=0&max_results=20&sortBy=submittedDate&sortOrder=descending", "homepage": "https://arxiv.org/",
+    "class": "研究发现", "layer": "practitioner", "language": "en", "priority": "P2", "cadence": "12h", "focus": "Context engineering · Memory · Long-horizon agents", "independentGroup": "arxiv", "maxItems": 20, "enabled": true
+  },
+  {
+    "id": "arxiv-mcp", "family": "research", "name": "arXiv · Model Context Protocol", "kind": "feed", "url": "https://export.arxiv.org/api/query?search_query=all%3A%22model%20context%20protocol%22&start=0&max_results=20&sortBy=submittedDate&sortOrder=descending", "homepage": "https://arxiv.org/",
+    "class": "研究发现", "layer": "practitioner", "language": "en", "priority": "P2", "cadence": "24h", "focus": "Model Context Protocol · Tool security · Interoperability", "independentGroup": "arxiv", "maxItems": 20, "enabled": true
+  },
+  {
+    "id": "arxiv-llm-agents", "family": "research", "name": "arXiv · LLM Agents", "kind": "feed", "url": "https://export.arxiv.org/api/query?search_query=all%3A%22LLM%20agent%22&start=0&max_results=20&sortBy=submittedDate&sortOrder=descending", "homepage": "https://arxiv.org/",
+    "class": "研究发现", "layer": "practitioner", "language": "en", "priority": "P2", "cadence": "12h", "focus": "LLM agents · Planning · Memory · Tool use", "independentGroup": "arxiv", "maxItems": 20, "enabled": true
+  },
+  {
+    "id": "arxiv-code-repair", "family": "research", "name": "arXiv · Automated Code Repair", "kind": "feed", "url": "https://export.arxiv.org/api/query?search_query=all%3A%22automated%20code%20repair%22&start=0&max_results=20&sortBy=submittedDate&sortOrder=descending", "homepage": "https://arxiv.org/",
+    "class": "研究发现", "layer": "practitioner", "language": "en", "priority": "P2", "cadence": "12h", "focus": "Automated code repair · Coding agents · Validation", "independentGroup": "arxiv", "maxItems": 20, "enabled": true
   }
 ]

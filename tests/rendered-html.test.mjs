@@ -58,6 +58,7 @@ async function createProductionSnapshotFixture() {
       name: conceptFixture.sourceName,
       homepage: "https://example.com/agent-harness",
       class: "一手工程",
+      family: "official",
       priority: "P0",
       cadence: "4h",
       focus: "Agent Harness",
@@ -69,6 +70,7 @@ async function createProductionSnapshotFixture() {
         name: "中文 Agent 社区",
         homepage: "https://github.com/example-cn/agent-coding/issues",
         class: "中文社区",
+        family: "community",
         priority: "P1",
         cadence: "4h",
         focus: "多智能体编排 · AI Coding",
@@ -79,6 +81,7 @@ async function createProductionSnapshotFixture() {
         name: "Hacker News",
         homepage: "https://news.ycombinator.com/",
         class: "英文社区",
+        family: "community",
         priority: "P1",
         cadence: "4h",
         focus: "Agent Harness · Durable execution",
@@ -90,6 +93,7 @@ async function createProductionSnapshotFixture() {
       name: "Independent Agent Engineer",
       homepage: "https://practitioner.example.com",
       class: "实践者",
+      family: "practitioner",
       priority: "P1",
       cadence: "8h",
       focus: candidateConceptFixture.name,
@@ -140,6 +144,9 @@ async function createProductionSnapshotFixture() {
       sourceName: discussionSources[0].name,
       sourceClass: discussionSources[0].class,
       independentGroup: discussionSources[0].independentGroup,
+      sourceLayer: "community",
+      sourceLanguage: "zh",
+      engagementCount: 180,
       originalTitle: discussionFixture.chineseTitle,
       originalExcerpt: "中文开发者讨论多智能体任务拆分、验收和失败恢复。",
       contentText: "中文开发者讨论多智能体任务拆分、验收和失败恢复。",
@@ -161,6 +168,13 @@ async function createProductionSnapshotFixture() {
       accent: "signal",
       tags: ["multi-agent-orchestration"],
       analysisMode: "deepseek",
+      publishDecision: "watch",
+      editorialScore: 68,
+      aiRelevanceScore: 82,
+      noveltyScore: 88,
+      evidenceScore: 45,
+      eventKey: "community:multi-agent-acceptance",
+      candidateConcept: "真实代码库多智能体验收边界",
     }), true);
     assert.equal(insertArticle(database, {
       url: discussionFixture.englishUrl,
@@ -168,6 +182,9 @@ async function createProductionSnapshotFixture() {
       sourceName: discussionSources[1].name,
       sourceClass: discussionSources[1].class,
       independentGroup: discussionSources[1].independentGroup,
+      sourceLayer: "community",
+      sourceLanguage: "en",
+      engagementCount: 420,
       originalTitle: discussionFixture.englishTitle,
       originalExcerpt: "An English discussion about checkpoints and traces for long-running coding agents.",
       contentText: "An English discussion about checkpoints and traces for long-running coding agents.",
@@ -189,6 +206,13 @@ async function createProductionSnapshotFixture() {
       accent: "signal",
       tags: ["coding-agent", "agent-harness"],
       analysisMode: "deepseek",
+      publishDecision: "watch",
+      editorialScore: 70,
+      aiRelevanceScore: 86,
+      noveltyScore: 84,
+      evidenceScore: 40,
+      eventKey: "community:long-running-agent-debugging",
+      candidateConcept: "长任务 Agent 调试工作流",
     }), true);
     const candidateSignalSlug = "agent-reliability-engineering-candidate";
     assert.equal(insertArticle(database, {
@@ -612,7 +636,7 @@ test("model atlas compares coding, everyday capability and price with evidence i
   assert.match(mainText, /社区讨论脉冲.{0,12}定时采集更新/);
 });
 
-test("discussions page exposes bilingual community evidence layers and original links", async () => {
+test("discussions page server-renders watch exploration pulses with Chinese LLM reads, original links and explicit evidence boundaries", async () => {
   const response = await render("/discussions");
   assert.equal(response.status, 200);
   const html = await response.text();
@@ -627,9 +651,30 @@ test("discussions page exposes bilingual community evidence layers and original 
   assert.ok(english.length >= 1, "必须展示英文社区讨论");
   assert.match(mainText, new RegExp(discussionFixture.chineseTitle));
   assert.match(mainText, new RegExp(discussionFixture.englishTitle));
+  assert.match(mainText, /讨论聚焦真实代码库中的角色拆分、验收责任和失败恢复/);
+  assert.match(mainText, /讨论聚焦检查点、运行 trace 和长任务失败定位/);
   assert.equal(chinese.find(`a[href='${discussionFixture.chineseUrl}']`).length, 1);
   assert.equal(english.find(`a[href='${discussionFixture.englishUrl}']`).length, 1);
+  for (const card of [chinese, english]) {
+    assert.match(card.attr("data-heat-score") || "", /^\d+(?:\.\d+)?$/, "社区卡片必须公开可解释热度分值");
+    assert.match(card.text(), /热度|互动/, "社区卡片必须说明热度或参与线索，不能只在内部排序");
+    assert.match(card.text(), /独立来源广度/, "参与维度必须明确表示独立来源组，而不是模糊的用户人数");
+    assert.match(card.text(), /待交叉验证|待溯源/, "热度展示必须与证据边界同时出现");
+  }
   assert.match(mainText, /官方|实践者|社区/);
+});
+
+test("sources page renders configured, available and effective coverage without replacing evidence layers", async () => {
+  const response = await render("/sources");
+  assert.equal(response.status, 200);
+  const $ = load(await response.text());
+  const mainText = $("main").text().replace(/\s+/g, " ");
+  assert.match(mainText, /Configured|已配置|正式注册/i);
+  assert.match(mainText, /Available|当前可用/i);
+  assert.match(mainText, /Effective|当前快照有效/i, "Effective 必须明确是当前公开快照口径，不能暗示历史曾产出即可");
+  assert.match(mainText, /独立来源组/, "来源覆盖必须同时公开去重后的独立来源组口径");
+  assert.match(mainText, /官方|工程仓库|实践者|社区|研究/);
+  assert.match(mainText, /证据层|Evidence Layer/i, "发现 family 不能替代 official/practitioner/community 证据层");
 });
 
 test("concepts page renders traceable candidates separately from the established concept catalog", async () => {
@@ -718,6 +763,12 @@ test("public status endpoint exposes ingestion health without a login", async ()
   assert.equal(status.service, "agent-radar");
   assert.ok(["live", "seed"].includes(status.mode));
   assert.equal(typeof status.sourceCount, "number");
+  assert.deepEqual(Object.keys(status.sourceCoverage).sort(), ["byFamily", "byLayer", "total"]);
+  assert.equal(status.sourceCoverage.total.configured, status.sourceCount);
+  assert.equal(typeof status.sourceCoverage.total.available, "number");
+  assert.equal(typeof status.sourceCoverage.total.effective, "number");
+  assert.ok(status.sourceCoverage.byFamily.community.configured >= 2);
+  assert.ok(status.sourceCoverage.byLayer.community.configured >= 2);
   assert.ok(Array.isArray(status.sources));
   assert.equal(status.modelLandscape.itemCount, 48);
   assert.equal(status.modelLandscape.source, "Artificial Analysis");
@@ -731,6 +782,7 @@ test("public status endpoint normalizes legacy snapshots that predate provider a
   assert.equal(legacySnapshot.status.analysisMode, "deepseek", "fixture 必须保留旧版可迁移的 analysisMode 权威值");
   delete legacySnapshot.status.configuredProvider;
   delete legacySnapshot.status.runAnalysisMode;
+  delete legacySnapshot.status.sourceCoverage;
   await writeFile(snapshotPath, `${JSON.stringify(legacySnapshot, null, 2)}\n`, "utf8");
 
   const response = await render("/api/status");
@@ -738,6 +790,13 @@ test("public status endpoint normalizes legacy snapshots that predate provider a
   const status = await response.json();
   assert.equal(status.configuredProvider, "rules", "当前服务已禁用 AI，旧快照的历史 DeepSeek 语料口径不得冒充当前 configuredProvider");
   assert.equal(status.runAnalysisMode, "none", "旧快照没有可验证的本轮执行记录，不能把历史文章口径冒充 runAnalysisMode");
+  assert.deepEqual(status.sourceCoverage.total, {
+    configured: legacySnapshot.status.sourceCount,
+    available: legacySnapshot.status.availableSourceCount,
+    effective: 0,
+  }, "真实旧快照缺失 sourceCoverage 时，API 必须从旧总数字段安全回退");
+  assert.deepEqual(status.sourceCoverage.byLayer, {});
+  assert.deepEqual(status.sourceCoverage.byFamily, {});
 });
 
 test("missing corrupt or seed snapshots never expose curated fallback signals in production", async () => {

@@ -150,6 +150,29 @@ test("start and restart run editorial readiness before changing service state", 
   );
 });
 
+test("scheduler installs an hourly systemd wake-up while source cadence remains inside ingestion", async () => {
+  const scheduler = await readFile(new URL("../scripts/install-scheduler.sh", import.meta.url), "utf8");
+
+  assert.match(
+    scheduler,
+    /ExecStart=.*scripts\/ingest\.mjs --trigger systemd/u,
+    "systemd service 必须进入带 trigger=systemd 的生产采集入口，由 runIngestion 再按每个 source 的 cadence 过滤",
+  );
+  assert.match(scheduler, /\[Timer\][\s\S]*OnUnitActiveSec=1h/u, "最短 1h 来源要求 timer 每小时唤醒一次");
+  assert.match(scheduler, /install -m 0644[\s\S]*SERVICE_FILE/u, "安装脚本必须真正写入 service unit");
+  assert.match(scheduler, /install -m 0644[\s\S]*TIMER_FILE/u, "安装脚本必须真正写入 timer unit");
+  assert.match(scheduler, /systemctl enable --now[\s\S]*TIMER_NAME/u, "安装后必须启用并立即启动 timer");
+  const timeout = scheduler.match(/TimeoutStartSec=(\d+)(min|h)/u);
+  assert.ok(timeout, "systemd oneshot 必须声明明确的启动超时");
+  const timeoutMinutes = Number(timeout[1]) * (timeout[2] === "h" ? 60 : 1);
+  assert.ok(
+    timeoutMinutes >= 120,
+    "大陆 concurrency=2、30 秒上游超时、89 来源及 relay/fallback/enrichment 的首轮预算不能被 45 分钟 systemd 提前杀死",
+  );
+  assert.match(scheduler, /每 1 小时|每小时/u, "运维文案必须说明新的每小时唤醒频率");
+  assert.doesNotMatch(scheduler, /每 4 小时|every four hours/iu, "文案与 unit 不得继续声称四小时唤醒");
+});
+
 test("editorial readiness requires a valid live snapshot and a nonempty fully ready database", async () => {
   const previousDataDirectory = process.env.RADAR_DATA_DIR;
   const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-editorial-readiness-"));
