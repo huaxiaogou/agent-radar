@@ -9,7 +9,7 @@ export type SignalSource = {
   name: string;
   href: string;
   layer?: SourceLayer;
-  language?: "zh" | "en";
+  language?: "zh" | "en" | "mixed";
   originalTitle?: string;
   publishedAt?: string;
 };
@@ -70,7 +70,7 @@ export type RadarSource = {
   lastError?: string | null;
   itemCount?: number;
   layer?: SourceLayer;
-  language?: "zh" | "en";
+  language?: "zh" | "en" | "mixed";
 };
 
 export type ModelPulseWindow = Record<SourceLayer, number> & { total: number };

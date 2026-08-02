@@ -394,6 +394,43 @@ export function getRecentArticles(database, limit = 240) {
   `).all(limit);
 }
 
+export function getPublishedArticlesForBackfill(database) {
+  return database.prepare(`
+    SELECT * FROM articles
+    WHERE publish_decision = 'publish'
+    ORDER BY COALESCE(published_at, discovered_at) DESC, url ASC
+  `).all();
+}
+
+export function updatePublishedArticleEditorial(database, article) {
+  const result = database.prepare(`
+    UPDATE articles SET
+      title = ?,
+      summary = ?,
+      implication = ?,
+      analysis_mode = ?
+    WHERE url = ?
+      AND content_hash = ?
+      AND publish_decision = 'publish'
+      AND title = ?
+      AND summary = ?
+      AND implication = ?
+      AND analysis_mode = ?
+  `).run(
+    article.title,
+    article.summary,
+    article.implication,
+    article.analysisMode,
+    article.url,
+    article.contentHash,
+    article.expectedTitle,
+    article.expectedSummary,
+    article.expectedImplication,
+    article.expectedAnalysisMode,
+  );
+  return Number(result.changes) === 1;
+}
+
 export function getRecentCandidateArticles(database, limit = 120) {
   return database.prepare(`
     SELECT * FROM articles

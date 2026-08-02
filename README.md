@@ -18,7 +18,7 @@ Agent Radar 是一个面向 AI Coding 与 Agent 工程实践的个人技术情�
 - 39 个公开免登录来源，覆盖全球与中文团队发布流、独立实践者、定向论文/技术媒体和中英文开发者社区；产品不按地域分榜。
 - SQLite 保存原始文章、来源健康度和每次任务结果；页面读取原子 JSON 快照。
 - 中英文宽召回、正文补全后二次相关性过滤、URL 去重、eventKey 事件聚类和概念归类。
-- 无密钥即可使用规则分析；可选择 DeepSeek 或 OpenAI 执行 publish/watch/reject 编辑判断、相关性/新颖性/证据质量精排与结构化中文工程分析，单篇失败自动降级。`watch + candidateConcept` 只进入候选队列，不会发布为信号。
+- DeepSeek 或 OpenAI 对所有通过正文补全与发现阈值的候选执行 publish/watch/reject 判断、相关性/新颖性/证据质量精排，并生成中文编辑标题、摘要和工程解读。原文保持原语言并保留跳转链接；规则分析只用于召回、分类修复和失败审计，不能成为公开卡片正文。`RADAR_MAX_NEW_ITEMS` 只限制最终发布，不会提前截断单一来源的正文补全或 LLM 分析。
 - systemd timer 每 4 小时采集，单一来源失败不会清空或阻断既有内容。
 
 网站是公开只读访问，不要求登录。采集入口仅存在于服务器脚本和 systemd，不对公网暴露写接口。
@@ -67,9 +67,12 @@ cd agent-radar
 npm ci
 chmod +x scripts/*.sh
 
-# 可选；不填写任何模型 Key 时仍可完整运行规则分析
+# 正式公开信号需要配置 DeepSeek 或 OpenAI；Key 只保存在服务器
 cp .env.example .env.production
 chmod 600 .env.production
+
+# 先验证真实 LLM 请求与中文结构化输出
+npm run ai:check
 
 # 先生成第一份正式数据快照
 npm run ingest
@@ -88,6 +91,11 @@ sudo ./scripts/install-scheduler.sh
 ```bash
 git pull --ff-only
 npm ci
+
+# ai:check 固定产生一次小额真实请求；backfill 在没有待处理记录时不调用模型
+npm run ai:check
+RADAR_BACKFILL_CONCURRENCY=4 npm run editorial:backfill
+
 ./scripts/restart.sh
 ```
 
@@ -97,7 +105,7 @@ npm ci
 
 ## AI 分析供应商
 
-分析层支持 `deepseek`、`openai`、`rules` 和 `auto`。推荐在服务器 `.env.production` 显式选择供应商；密钥不得提交到 Git。
+分析层支持 `deepseek`、`openai`、`rules` 和 `auto`。正式站推荐在服务器 `.env.production` 显式选择 DeepSeek 或 OpenAI；密钥不得提交到 Git。`rules` 仍可用于无模型诊断和保存待回填数据，但其标题、摘要和工程解读不会进入公开信号。
 
 DeepSeek 配置：
 
@@ -116,9 +124,20 @@ OPENAI_API_KEY=你的OpenAIKey
 RADAR_OPENAI_MODEL=gpt-5.6-terra
 ```
 
-`auto` 用于兼容既有部署：优先使用已配置的 OpenAI；没有 OpenAI Key、但存在 DeepSeek Key 时使用 DeepSeek；两个 Key 都没有时使用本地规则。`RADAR_AI_PROVIDER=rules` 或 `RADAR_DISABLE_AI=1` 可以强制关闭外部模型。
+`auto` 用于兼容既有部署：优先使用已配置的 OpenAI；没有 OpenAI Key、但存在 DeepSeek Key 时使用 DeepSeek；两个 Key 都没有时使用本地规则。`RADAR_AI_PROVIDER=rules` 或 `RADAR_DISABLE_AI=1` 可以关闭外部模型，但此时新文章只能进入待回填存储，不能生成公开卡片。
 
-供应商只分析本轮新收录文章。既有文章不会自动重算，以避免重复计费和历史结果无声漂移。DeepSeek 返回有效标题、摘要和工程含义、但分类枚举越界时，分类字段由本地确定性规则修复，并在日志与任务结果中记录 `AI repairs`；模型返回空内容、缺少核心文本、无效 JSON、超时或服务异常时才会重试并最终回退整篇规则分析。
+每个通过正文补全与发现阈值的候选都会进入配置的 LLM；`RADAR_MAX_NEW_ITEMS` 只限制最终公开数量，不再把超额候选降级为规则文案。模型返回的 `title`、`summary`、`implication` 必须通过中文编辑校验，产品名、框架名、缩写和版本号可以保留原文。无效语言、空内容、无效 JSON、超时或服务异常最多重试一次；最终失败会写入本轮任务错误日志并保持非公开，不落成终态文章，因此下轮扫描仍可重试。
+
+已有 `analysis_mode=rules` 的公开文章不会由普通 URL 去重采集自动覆盖。更新到本版本后执行一次并发、幂等的历史回填：
+
+```bash
+npm run ai:check
+RADAR_BACKFILL_CONCURRENCY=4 npm run editorial:backfill
+```
+
+回填严格只选择 `analysis_mode=rules` 的公开历史记录，直接读取 SQLite 中保存的原始标题、摘要和正文，不重新抓取网页，不限制总条数。已经标记为 DeepSeek/OpenAI 的历史记录不会被自动重新解释；不合格记录会被公开门禁隔离。每篇成功后只条件更新中文标题、中文摘要、工程解读和实际分析供应商；URL、原始语言内容、内容哈希、来源、聚类、分类、分数和发布状态保持不变。单篇失败不会覆盖旧记录，命令返回非零且不替换线上快照；再次执行只处理剩余 rules 项目。回填与定时采集共用同一把进程锁，不能并行运行。
+
+快照写入入口还会检查全库公开记录：只要仍有一条 rules 或未通过中文校验的公开记录，回填、手工采集和 systemd 采集都不能替换旧快照。只有 backlog 归零后才会一次性切换完整结果，避免部分回填结果被下一轮定时任务提前发布。合法采集如果暂时只有 watch/reject、没有公开文章，可以保存 seed 状态，但缺失、损坏或 seed 快照在运行期都会失败关闭为 0 条公开信号，不会回退展示内置示例卡片；`start.sh` 和 `restart.sh` 仍要求非空真实数据与合法 live snapshot。
 
 配置完成后可执行一次小额真实请求验证 Key、模型和结构化输出；命令不会打印密钥或分析正文：
 
@@ -132,8 +151,8 @@ npm run ai:check
 
 1. 从 `config/sources.json` 读取正式来源注册表。
 2. 并发抓取 RSS/Atom、公开 JSON API、GitHub Releases 和经过 URL 白名单约束的 HTML 页面；每次 HTTPS 请求都会拒绝内网/元数据地址和非安全重定向，并把已验证的 DNS 地址固定到实际 TLS 连接以阻断 DNS rebinding。
-3. 进行中英文宽召回、按来源轮询补全正文和二次相关性检查；即使来源数超过发布上限，也先保证每个到期来源至少一篇进入正文判断。官方、实践者与社区证据分别计数，社区重复不能自行升级为高置信。
-4. 按 `RADAR_AI_PROVIDER` 使用 DeepSeek Chat Completions、OpenAI Responses API 或本地规则给出 publish/watch/reject 决策与编辑分数，再按 eventKey、版本和概念边界聚类；外部模型失败自动回退规则。证据不足的新概念候选会隔离保存，等待后续溯源，不参与公开信号与正式概念排序；后续复核通过可原位晋级，复核否决则保留审计行并从候选池退役。
+3. 进行中英文宽召回，按来源轮询顺序对全部未见候选补全正文并做二次相关性检查；发布上限不会提前截断正文补全或 LLM 分析。官方、实践者与社区证据分别计数，社区重复不能自行升级为高置信。
+4. 所有通过正文补全与发现阈值的候选都由 `RADAR_AI_PROVIDER` 指定的 DeepSeek Chat Completions 或 OpenAI Responses API 生成 publish/watch/reject 决策和中文编辑结果，再按 eventKey、版本和概念边界聚类。模型最终失败只记录任务错误且不落成公开文章，下轮扫描可继续重试；证据不足的新概念候选会隔离保存，等待后续溯源，不参与公开信号与正式概念排序。
 5. 在 `.data/agent-radar.sqlite` 中提交文章、来源健康度和任务记录。
 6. 生成 `.data/radar-snapshot.json` 临时文件，完整写入并同步后原子替换线上快照。
 
@@ -146,6 +165,9 @@ systemd 每四小时唤醒一次采集服务；每个来源再按 `config/source
 ```bash
 # 手工补跑
 npm run ingest
+
+# 一次性或可恢复地补齐历史中文 LLM 编辑
+RADAR_BACKFILL_CONCURRENCY=4 npm run editorial:backfill
 
 # 查看网站当前数据状态
 npm run radar:status

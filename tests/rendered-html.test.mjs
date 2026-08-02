@@ -620,3 +620,56 @@ test("public status endpoint normalizes legacy snapshots that predate provider a
   assert.equal(status.configuredProvider, "rules", "当前服务已禁用 AI，旧快照的历史 DeepSeek 语料口径不得冒充当前 configuredProvider");
   assert.equal(status.runAnalysisMode, "none", "旧快照没有可验证的本轮执行记录，不能把历史文章口径冒充 runAnalysisMode");
 });
+
+test("missing corrupt or seed snapshots never expose curated fallback signals in production", async () => {
+  const snapshotPath = `${dataDirectory}/radar-snapshot.json`;
+  const liveSnapshotText = await readFile(snapshotPath, "utf8");
+  const curatedFallbackTitle = "Graph Engineering：把 Agent 工作流变成可审计的执行结构";
+  const explicitSeedTitle = "绝不能公开的 CURATED SEED 信号";
+  const seedSnapshot = JSON.parse(liveSnapshotText);
+  seedSnapshot.status = {
+    ...seedSnapshot.status,
+    mode: "seed",
+    runStatus: "never",
+    analysisMode: "curated",
+    signalCount: 1,
+    stale: true,
+  };
+  seedSnapshot.signals = [{ ...seedSnapshot.signals[0], title: explicitSeedTitle, analysisMode: "curated" }];
+  const scenarios = [
+    {
+      name: "missing",
+      prepare: () => rm(snapshotPath, { force: true }),
+    },
+    {
+      name: "corrupt",
+      prepare: () => writeFile(snapshotPath, "{corrupt-json", "utf8"),
+    },
+    {
+      name: "seed",
+      prepare: () => writeFile(snapshotPath, `${JSON.stringify(seedSnapshot)}\n`, "utf8"),
+    },
+  ];
+
+  try {
+    for (const scenario of scenarios) {
+      await scenario.prepare();
+      const todayResponse = await render("/today");
+      assert.equal(todayResponse.status, 200, scenario.name);
+      const html = await todayResponse.text();
+      assert.doesNotMatch(html, new RegExp(curatedFallbackTitle), `${scenario.name} 快照不能回退公开内置 curated signals`);
+      assert.doesNotMatch(html, new RegExp(explicitSeedTitle), `${scenario.name} 快照不能公开 seed signals`);
+      assert.match(load(html).text(), /0\s*条有效信号/, `${scenario.name} 快照必须以空公开信号失败关闭`);
+
+      const statusResponse = await render("/api/status");
+      assert.equal(statusResponse.status, 200, scenario.name);
+      const status = await statusResponse.json();
+      assert.equal(status.signalCount, 0, `${scenario.name} 数据层不得报告 curated signalCount`);
+      assert.equal(status.stale, true, `${scenario.name} 数据层必须标记 stale`);
+
+      await writeFile(snapshotPath, liveSnapshotText, "utf8");
+    }
+  } finally {
+    await writeFile(snapshotPath, liveSnapshotText, "utf8");
+  }
+});

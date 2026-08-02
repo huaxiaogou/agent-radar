@@ -1,6 +1,16 @@
 import { open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
-import { getArticleCount, getLatestRun, getRecentArticles, getRecentCandidateArticles, getSnapshotPath, getSourceHealth } from "./database.mjs";
+import {
+  getArticleCount,
+  getLatestRun,
+  getPublishedArticlesForBackfill,
+  getRecentArticles,
+  getRecentCandidateArticles,
+  getSnapshotPath,
+  getSourceHealth,
+  openDatabase,
+} from "./database.mjs";
+import { isLlmEditorialReady } from "./editorial.mjs";
 
 const conceptsUrl = new URL("../config/concepts.json", import.meta.url);
 const modelAliasesUrl = new URL("../config/model-aliases.json", import.meta.url);
@@ -107,11 +117,16 @@ function groupSignals(rows) {
     groups.set(row.signal_slug, current);
   }
 
-  return [...groups.entries()].map(([slug, articles]) => {
-    const sorted = [...articles].sort((left, right) => {
+  return [...groups.entries()].flatMap(([slug, articles]) => {
+    const representativeCandidates = articles.filter(isLlmEditorialReady);
+    if (!representativeCandidates.length) return [];
+    const sorted = [...representativeCandidates].sort((left, right) => {
       const layerDifference = layerWeight(sourceLayer(right)) - layerWeight(sourceLayer(left));
-      const analysisWeight = Number(right.analysis_mode !== "rules") - Number(left.analysis_mode !== "rules");
-      return layerDifference || analysisWeight || Number(right.editorial_score || 0) - Number(left.editorial_score || 0) || right.relevance_score - left.relevance_score || dateValue(eventAt(right)) - dateValue(eventAt(left));
+      return layerDifference
+        || Number(right.editorial_score || 0) - Number(left.editorial_score || 0)
+        || Number(right.relevance_score || 0) - Number(left.relevance_score || 0)
+        || dateValue(eventAt(right)) - dateValue(eventAt(left))
+        || String(left.url).localeCompare(String(right.url));
     });
     const representative = sorted[0];
     const newestAt = articles.reduce((latest, article) => dateValue(eventAt(article)) > dateValue(latest) ? eventAt(article) : latest, eventAt(articles[0]));
@@ -143,7 +158,12 @@ function groupSignals(rows) {
     }
     const sourceMix = sourceMixFor(articles);
     const { verificationState, confidence } = verificationFor(sourceMix);
-    return {
+    const representativeSource = sources.find((source) => source.href === representative.url);
+    let publicSources = sources.slice(0, 8);
+    if (representativeSource && !publicSources.some((source) => source.href === representative.url)) {
+      publicSources = [...publicSources.slice(0, 7), representativeSource];
+    }
+    return [{
       slug,
       eyebrow: `${representative.source_class} · ${recencyLabel(newestAt)}`,
       title: representative.title,
@@ -159,13 +179,13 @@ function groupSignals(rows) {
       sourceMix,
       accent: representative.accent,
       evidence,
-      sources: sources.slice(0, 8),
+      sources: publicSources,
       publishedAt: newestAt,
       discoveredAt: representative.discovered_at,
       analysisMode: representative.analysis_mode,
       conceptSlug: representative.concept_slug,
       relevanceScore: Math.max(...articles.map((article) => article.relevance_score)),
-    };
+    }];
   }).sort((left, right) => {
     const verificationWeight = { "cross-verified": 4, "official-only": 3, "independently-observed": 2, "practitioner-only": 1, "community-only": 0 };
     const leftDay = Math.floor(dateValue(left.publishedAt) / 86_400_000);
@@ -394,7 +414,24 @@ export async function buildSnapshot(database) {
   };
 }
 
+export function getPublicEditorialBacklog(database) {
+  return getPublishedArticlesForBackfill(database).filter((article) => !isLlmEditorialReady(article));
+}
+
+export function assertPublicEditorialReady(database) {
+  const backlog = getPublicEditorialBacklog(database);
+  if (!backlog.length) return;
+  const preview = backlog.slice(0, 5).map((article) => article.url).join("、");
+  throw new Error(`公开中文编辑 backlog 未就绪（${backlog.length} 条），快照发布已阻断：${preview}`);
+}
+
 export async function writeSnapshotAtomic(snapshot) {
+  const readinessDatabase = openDatabase();
+  try {
+    assertPublicEditorialReady(readinessDatabase);
+  } finally {
+    readinessDatabase.close();
+  }
   const target = getSnapshotPath();
   const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
   let handle;

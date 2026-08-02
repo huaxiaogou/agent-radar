@@ -65,14 +65,6 @@ export function selectFairly(candidates, limit) {
   return selected;
 }
 
-function aiItemLimit(publishLimit) {
-  const configured = String(process.env.RADAR_MAX_AI_ITEMS || "").trim();
-  if (!configured) return publishLimit;
-  const value = Number(configured);
-  if (!Number.isInteger(value) || value < 0) throw new Error("RADAR_MAX_AI_ITEMS 必须是非负整数");
-  return Math.min(value, publishLimit);
-}
-
 function finalRelevanceScore(ruleScore, analysis) {
   const aiScore = Number(analysis.relevanceScore);
   if (!Number.isFinite(aiScore)) return ruleScore;
@@ -194,8 +186,7 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
 
     candidates.sort((left, right) => right.relevanceScore - left.relevanceScore || new Date(right.publishedAt || 0) - new Date(left.publishedAt || 0));
     const publishLimit = Number(process.env.RADAR_MAX_NEW_ITEMS || 48);
-    const selected = selectFairly(candidates, publishLimit);
-    skippedCount += Math.max(0, candidates.length - selected.length);
+    const selected = selectFairly(candidates, candidates.length);
     const enrichedItems = await mapLimit(
       selected,
       Number(process.env.RADAR_FETCH_CONCURRENCY || 4),
@@ -209,14 +200,13 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
       }
       return [{ ...item, relevanceScore }];
     });
-    const maxAIItems = aiItemLimit(publishLimit);
     let analysisFallbackCount = 0;
     let analysisRepairCount = 0;
     const analyzed = await mapLimit(
       enriched,
       Number(process.env.RADAR_ANALYSIS_CONCURRENCY || 2),
-      async (item, index) => {
-        const result = await analyzeItem(item, index < maxAIItems ? analysisProvider : "rules");
+      async (item) => {
+        const result = await analyzeItem(item, analysisProvider);
         if (result.analysisError) {
           analysisFallbackCount += 1;
           logger.error?.(`[analysis:${item.url}] ${result.analysisError}`);

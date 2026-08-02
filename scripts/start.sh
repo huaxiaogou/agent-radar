@@ -76,6 +76,7 @@ fi
 }
 
 cd "${APP_DIR}"
+node --no-warnings "${APP_DIR}/scripts/check-editorial-readiness.mjs"
 if [[ "${BUILD}" == "1" || ! -f "${APP_DIR}/.next/BUILD_ID" ]]; then
   npm run build
 fi

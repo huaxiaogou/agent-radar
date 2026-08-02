@@ -122,6 +122,96 @@ function deepSeekPublishAnalysis(title, candidateConcept = "") {
   };
 }
 
+function englishPublishAnalysis(title = "Agent Harness adds durable recovery") {
+  return {
+    title,
+    summary: "The official source documents checkpoint recovery and auditable tool execution for long-running coding agents.",
+    implication: "Engineering teams should validate restart safety, tool permissions, and replay behavior before production use.",
+    topic: "工程",
+    conceptSlug: "agent-harness",
+    stage: "Emerging",
+    accent: "engineering",
+    tags: ["agent-harness", "durable-execution"],
+    publishDecision: "publish",
+    editorialScore: 82,
+    relevanceScore: 90,
+    noveltyScore: 76,
+    evidenceScore: 88,
+    eventKey: "agent-harness:durable-recovery-update",
+    candidateConcept: "",
+  };
+}
+
+function japanesePublishAnalysis() {
+  return {
+    ...englishPublishAnalysis(),
+    title: "Claude Code が復旧可能なタスク実行を追加",
+    summary: "公式チームは長時間のコードエージェント向けに、チェックポイント、承認、ツール呼び出しの再実行を追加したと説明しています。",
+    implication: "導入前に中断からの復旧、権限境界、ツール呼び出しの安全性を実際のリポジトリで検証する必要があります。",
+  };
+}
+
+function englishDominantPublishAnalysis() {
+  return {
+    ...englishPublishAnalysis(),
+    title: "Claude Code v2.1 release 增加恢复",
+    summary: "This release adds checkpoints, approvals, and tool-call replay. 工程验证需要确认",
+    implication: "Teams should validate restart safety and permission boundaries. 团队需要持续验证",
+  };
+}
+
+function koreanDominantPublishAnalysis() {
+  return {
+    ...englishPublishAnalysis(),
+    title: "복구 가능한 작업 실행 기능 추가 更新",
+    summary: "공식 팀은 체크포인트와 승인 및 도구 호출 복구 기능을 추가했다고 설명했습니다. 工程验证需要确认",
+    implication: "도입 전에 실제 저장소에서 재시작 안전성과 권한 경계를 검증해야 합니다. 团队需要持续验证",
+  };
+}
+
+function cyrillicDominantPublishAnalysis() {
+  return {
+    ...englishPublishAnalysis(),
+    title: "Добавлено восстановление длительных задач 更新",
+    summary: "Официальная команда описала контрольные точки, подтверждения и повторный запуск инструментов. 工程验证需要确认",
+    implication: "Перед внедрением необходимо проверить восстановление и границы разрешений в настоящем репозитории. 团队需要持续验证",
+  };
+}
+
+function arabicDominantPublishAnalysis() {
+  return {
+    ...englishPublishAnalysis(),
+    title: "إضافة استعادة المهام الطويلة 更新",
+    summary: "يشرح الفريق الرسمي نقاط التحقق والموافقات وإعادة تشغيل استدعاءات الأدوات بعد الفشل. 工程验证需要确认",
+    implication: "يجب اختبار أمان الاستئناف وحدود الصلاحيات في مستودع حقيقي قبل الاستخدام. 团队需要持续验证",
+  };
+}
+
+function providerTestItem() {
+  return {
+    title: "Agent Harness adds durable checkpoint recovery",
+    excerpt: "The official release documents tool calls, approvals, checkpoints, and recovery for coding agents.",
+    contentText: "The runtime persists checkpoints and replays failed tool calls with explicit approval evidence.",
+    sourceName: "Official Engineering",
+    sourceClass: "一手工程",
+    sourceLayer: "official",
+    sourceLanguage: "en",
+    relevanceScore: 10,
+    url: "https://example.com/agent-harness-recovery",
+    publishedAt: "2026-08-02T00:00:00.000Z",
+  };
+}
+
+function openAIResponse(analysis) {
+  return new Response(JSON.stringify({
+    status: "completed",
+    output: [{ type: "message", content: [{
+      type: "output_text",
+      text: JSON.stringify(analysis),
+    }] }],
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
 test("canonical URLs remove trackers and reject local targets", () => {
   assert.equal(
     canonicalizeUrl("/post?utm_source=test&id=7#section", "https://example.com/blog/"),
@@ -441,15 +531,15 @@ test("fair enrichment selection samples the first candidate from every due sourc
   );
 });
 
-test("runIngestion enriches every due feed source while the default AI and publish caps remain bounded", async () => {
+test("runIngestion LLM-analyzes every relevant enriched candidate while only capping final publication", async () => {
   const previousDataDirectory = process.env.RADAR_DATA_DIR;
   const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-fair-source-enrichment-"));
   const originalFetch = globalThis.fetch;
   const restoreEnvironment = configurePipelineTestEnvironment(isolatedDataDirectory, {
     RADAR_MAX_NEW_ITEMS: 2,
+    RADAR_MAX_AI_ITEMS: 1,
     RADAR_FETCH_CONCURRENCY: 8,
   });
-  delete process.env.RADAR_MAX_AI_ITEMS;
   const { loadSourceCatalog } = await import("../radar/catalog.mjs");
   const sources = await loadSourceCatalog();
   const feedSources = sources.filter((source) => source.kind === "feed");
@@ -514,7 +604,105 @@ test("runIngestion enriches every due feed source while the default AI and publi
       assert.equal(enrichedUrls.size, feedSources.length, "正文 enrichment 必须覆盖每个到期且产出候选的 feed 来源");
       assert.equal(result.acceptedCount, 2, "公平 enrichment 不得突破 RADAR_MAX_NEW_ITEMS 发布上限");
       assert.equal(publishedCount, 2, "数据库公开文章数也必须保持发布上限");
-      assert.equal(deepSeekCalls, 2, "未配置 RADAR_MAX_AI_ITEMS 时，AI 精分析默认上限必须保持 RADAR_MAX_NEW_ITEMS");
+      assert.equal(deepSeekCalls, feedSources.length, "所有通过 enrichment 发现阈值的候选都必须进入 LLM，旧 RADAR_MAX_AI_ITEMS 不得降级剩余候选");
+      assert.deepEqual(
+        database.prepare("SELECT DISTINCT analysis_mode FROM articles WHERE publish_decision = 'publish'").all().map((row) => row.analysis_mode),
+        ["deepseek"],
+        "最终公开记录不能混入因旧 AI 调用上限产生的 rules 展示文案",
+      );
+    } finally {
+      database.close();
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnvironment();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("one source cannot use the publish limit to skip enrichment or LLM analysis", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-single-source-analysis-"));
+  const originalFetch = globalThis.fetch;
+  const restoreEnvironment = configurePipelineTestEnvironment(isolatedDataDirectory, {
+    RADAR_MAX_NEW_ITEMS: 2,
+    RADAR_MAX_AI_ITEMS: 1,
+    RADAR_FETCH_CONCURRENCY: 8,
+    RADAR_ANALYSIS_CONCURRENCY: 3,
+  });
+  const { loadSourceCatalog } = await import("../radar/catalog.mjs");
+  const sources = await loadSourceCatalog();
+  const targetSource = sources.find((source) => source.kind === "feed" && Number(source.maxItems) >= 5);
+  assert.ok(targetSource, "测试目录必须有一个能返回至少 5 篇候选的 feed 来源");
+
+  const candidateCount = 5;
+  const articleUrls = Array.from(
+    { length: candidateCount },
+    (_, index) => `https://example.com/single-source/agent-harness-${index + 1}`,
+  );
+  const enrichedUrls = new Set();
+  let deepSeekCalls = 0;
+  const emptyFeed = "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>Empty Radar Feed</title></channel></rss>";
+  const feedBody = `<?xml version="1.0"?><rss version="2.0"><channel><title>${targetSource.name}</title>${articleUrls.map((articleUrl, index) => `
+    <item>
+      <title>Agent Harness durable execution update ${index + 1}</title>
+      <link>${articleUrl}</link>
+      <description>Agent coding harness context engineering, tool calls, checkpoints, recovery and acceptance tests.</description>
+      <pubDate>${new Date(Date.now() - (index + 1) * 60_000).toUTCString()}</pubDate>
+    </item>`).join("")}</channel></rss>`;
+
+  const sourceFetchImpl = async (input) => {
+    const url = String(input);
+    if (url === targetSource.url) {
+      return new Response(feedBody, { status: 200, headers: { "content-type": "application/rss+xml" } });
+    }
+    if (articleUrls.includes(url)) {
+      enrichedUrls.add(url);
+      return new Response("<html><body><article><h1>Agent Harness durable execution</h1><p>Agent coding harness context engineering, tool calls, checkpoints, recovery and acceptance tests.</p></article></body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    }
+    if (url.includes("hn.algolia.com")) {
+      return new Response(JSON.stringify({ hits: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.includes("bsky.app") || url.includes("bluesky")) {
+      return new Response(JSON.stringify({ posts: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response(emptyFeed, { status: 200, headers: { "content-type": "application/rss+xml" } });
+  };
+
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (!url.includes("api.deepseek.com") || !url.endsWith("/chat/completions")) {
+      throw new Error(`global fetch 只允许 DeepSeek：${url}`);
+    }
+    deepSeekCalls += 1;
+    const analysis = deepSeekPublishAnalysis(`单一来源第 ${deepSeekCalls} 篇 Agent Harness 更新`);
+    analysis.eventKey = `agent-harness:single-source-update-${deepSeekCalls}`;
+    return new Response(JSON.stringify({
+      choices: [{ finish_reason: "stop", message: { content: JSON.stringify(analysis) } }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const { runIngestion } = await import("../radar/pipeline.mjs");
+    const result = await runIngestion({
+      trigger: "test",
+      logger: { info() {}, warn() {}, error() {} },
+      fetchOptions: trustedFetchOptions(sourceFetchImpl),
+    });
+    const { openDatabase } = await import("../radar/database.mjs");
+    const database = openDatabase();
+    try {
+      const publishedRows = database.prepare("SELECT analysis_mode FROM articles WHERE publish_decision = 'publish'").all();
+      assert.equal(enrichedUrls.size, candidateCount, "发布上限只约束最终发布，不得截断同一来源的正文 enrichment");
+      assert.equal(deepSeekCalls, candidateCount, "同一来源中所有通过 enrichment 发现阈值的候选都必须调用 LLM");
+      assert.equal(result.acceptedCount, 2, "最终发布数量仍必须遵守 RADAR_MAX_NEW_ITEMS");
+      assert.equal(publishedRows.length, 2, "数据库公开文章数也必须保持发布上限");
+      assert.ok(publishedRows.every((row) => row.analysis_mode === "deepseek"), "最终公开记录必须全部来自 DeepSeek 分析");
     } finally {
       database.close();
     }
@@ -858,6 +1046,148 @@ test("optional OpenAI analysis uses a strict structured response and remains par
   }
 });
 
+for (const provider of ["deepseek", "openai"]) {
+  test(`${provider} retries English editorial fields and accepts the next Chinese edit`, async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDeepSeekKey = process.env.DEEPSEEK_API_KEY;
+    const originalOpenAIKey = process.env.OPENAI_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    let attempts = 0;
+    const analyses = [
+      englishPublishAnalysis(),
+      deepSeekPublishAnalysis("Agent Harness 增加可恢复检查点"),
+    ];
+    globalThis.fetch = async () => {
+      const analysis = analyses[Math.min(attempts, analyses.length - 1)];
+      attempts += 1;
+      if (provider === "openai") return openAIResponse(analysis);
+      return new Response(JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { content: JSON.stringify(analysis) } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    try {
+      const result = await analyzeItem(providerTestItem(), provider);
+      assert.equal(attempts, 2, "英文展示字段必须触发一次重试，不能直接进入公开信号");
+      assert.equal(result.analysisMode, provider);
+      assert.equal(result.title, "Agent Harness 增加可恢复检查点");
+      for (const field of ["title", "summary", "implication"]) {
+        assert.match(result[field], /[\u3400-\u9fff]/, `${field} 必须是中文编辑结果`);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDeepSeekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = originalDeepSeekKey;
+      if (originalOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenAIKey;
+    }
+  });
+
+  test(`${provider} final English failure falls back without publishing English source prose`, async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDeepSeekKey = process.env.DEEPSEEK_API_KEY;
+    const originalOpenAIKey = process.env.OPENAI_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    let attempts = 0;
+    globalThis.fetch = async () => {
+      attempts += 1;
+      const analysis = englishPublishAnalysis();
+      if (provider === "openai") return openAIResponse(analysis);
+      return new Response(JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { content: JSON.stringify(analysis) } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    try {
+      const result = await analyzeItem(providerTestItem(), provider);
+      assert.equal(attempts, 2, "中英文校验失败必须完成一次有界重试");
+      assert.equal(result.analysisMode, "rules");
+      assert.notEqual(result.publishDecision, "publish", "规则降级不得把英文原文作为公开展示文案发布");
+      assert.match(result.analysisError, /中文|语言/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDeepSeekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = originalDeepSeekKey;
+      if (originalOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenAIKey;
+    }
+  });
+
+  for (const [invalidLanguage, invalidAnalysis] of [
+    ["Japanese", japanesePublishAnalysis()],
+    ["English-dominant mixed", englishDominantPublishAnalysis()],
+    ["Korean-dominant mixed", koreanDominantPublishAnalysis()],
+    ["Cyrillic-dominant mixed", cyrillicDominantPublishAnalysis()],
+    ["Arabic-dominant mixed", arabicDominantPublishAnalysis()],
+  ]) {
+    test(`${provider} rejects ${invalidLanguage} editorial prose even when it contains enough Han characters`, async () => {
+      const originalFetch = globalThis.fetch;
+      const originalDeepSeekKey = process.env.DEEPSEEK_API_KEY;
+      const originalOpenAIKey = process.env.OPENAI_API_KEY;
+      process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+      process.env.OPENAI_API_KEY = "test-openai-key";
+      let attempts = 0;
+      const analyses = [
+        invalidAnalysis,
+        deepSeekPublishAnalysis("Claude Code v2.1 增加可恢复任务"),
+      ];
+      globalThis.fetch = async () => {
+        const analysis = analyses[Math.min(attempts, analyses.length - 1)];
+        attempts += 1;
+        if (provider === "openai") return openAIResponse(analysis);
+        return new Response(JSON.stringify({
+          choices: [{ finish_reason: "stop", message: { content: JSON.stringify(analysis) } }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      };
+
+      try {
+        const result = await analyzeItem(providerTestItem(), provider);
+        assert.equal(attempts, 2, `${invalidLanguage} 展示文案不能凭少量汉字绕过中文编辑门禁`);
+        assert.equal(result.analysisMode, provider);
+        assert.equal(result.title, "Claude Code v2.1 增加可恢复任务");
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (originalDeepSeekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+        else process.env.DEEPSEEK_API_KEY = originalDeepSeekKey;
+        if (originalOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
+        else process.env.OPENAI_API_KEY = originalOpenAIKey;
+      }
+    });
+  }
+
+  test(`${provider} accepts Chinese editorial prose with product names and versions`, async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDeepSeekKey = process.env.DEEPSEEK_API_KEY;
+    const originalOpenAIKey = process.env.OPENAI_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    let attempts = 0;
+    const analysis = deepSeekPublishAnalysis("Claude Code v2.1 增加可恢复任务");
+    globalThis.fetch = async () => {
+      attempts += 1;
+      if (provider === "openai") return openAIResponse(analysis);
+      return new Response(JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { content: JSON.stringify(analysis) } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    try {
+      const result = await analyzeItem(providerTestItem(), provider);
+      assert.equal(attempts, 1, "产品专名和版本号较多但主体为中文时不能误触发重试");
+      assert.equal(result.analysisMode, provider);
+      assert.equal(result.title, "Claude Code v2.1 增加可恢复任务");
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDeepSeekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = originalDeepSeekKey;
+      if (originalOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenAIKey;
+    }
+  });
+}
+
 test("analysis provider selection is explicit and preserves existing OpenAI deployments", () => {
   assert.equal(resolveAnalysisProvider({}), "rules");
   assert.equal(resolveAnalysisProvider({ DEEPSEEK_API_KEY: "deepseek-key" }), "deepseek");
@@ -961,6 +1291,31 @@ test("DeepSeek analysis uses JSON Output and records the real provider", async (
     else process.env.RADAR_DEEPSEEK_MODEL = originalModel;
     if (originalBaseUrl === undefined) delete process.env.RADAR_DEEPSEEK_BASE_URL;
     else process.env.RADAR_DEEPSEEK_BASE_URL = originalBaseUrl;
+  }
+});
+
+test("provider instructions demand concise Chinese editing instead of full translation", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+  let systemPrompt = "";
+  globalThis.fetch = async (_url, init) => {
+    const request = JSON.parse(init.body);
+    systemPrompt = request.messages?.[0]?.content || "";
+    return new Response(JSON.stringify({
+      choices: [{
+        finish_reason: "stop",
+        message: { content: JSON.stringify(deepSeekPublishAnalysis("Agent Harness 增加可恢复检查点")) },
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    await deepSeekAnalysis(providerTestItem());
+    assert.match(systemPrompt, /(?:不是|不要|禁止).{0,12}(?:全文|逐句).{0,4}翻译/, "提示词必须明确要求编辑提炼而不是全文翻译");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = originalKey;
   }
 });
 
@@ -1201,6 +1556,77 @@ test("runIngestion recalls a weak feed preview when enriched article content is 
     assert.equal(result.acceptedCount, 1);
     assert.equal(snapshot.status.signalCount, 1);
     assert.equal(snapshot.signals[0].sources.some((source) => source.href === articleUrl), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnvironment();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("runIngestion preserves foreign-language source evidence while publishing Chinese LLM edits", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-multilingual-evidence-"));
+  const originalFetch = globalThis.fetch;
+  const restoreEnvironment = configurePipelineTestEnvironment(isolatedDataDirectory, {
+    RADAR_MAX_NEW_ITEMS: 1,
+    RADAR_MAX_AI_ITEMS: 1,
+  });
+  const feedUrl = "https://www.v2ex.com/feed/programmer.xml";
+  const articleUrl = "https://www.v2ex.com/t/999995";
+  const originalTitle = "Agent Harness の durable checkpoint recovery 実装";
+  const originalExcerpt = "長時間 coding agent の tool calls と recovery を検証する公式ノート。";
+  const originalContent = "Agent Harness は checkpoints、approvals、tool-call replay を保持し、失敗後の recovery を検証する。";
+  const publishedAt = new Date(Date.now() - 3_600_000).toUTCString();
+  const feedBody = `<?xml version="1.0"?><rss version="2.0"><channel><title>Engineering</title><item><title>${originalTitle}</title><link>${articleUrl}</link><description>${originalExcerpt}</description><pubDate>${publishedAt}</pubDate></item></channel></rss>`;
+  const { fetchImpl, deepSeekFetchImpl, state } = isolatedCatalogFetch({
+    feedUrl,
+    feedBody,
+    articleUrl,
+    articleHtml: `<html><body><article>${originalContent}</article></body></html>`,
+    analyses: [deepSeekPublishAnalysis("Agent Harness 补充可恢复检查点实现")],
+  });
+  globalThis.fetch = deepSeekFetchImpl;
+
+  try {
+    const { runIngestion } = await import("../radar/pipeline.mjs");
+    const { openDatabase } = await import("../radar/database.mjs");
+    const result = await runIngestion({
+      trigger: "test",
+      logger: { info() {}, warn() {}, error() {} },
+      fetchOptions: trustedFetchOptions(fetchImpl),
+    });
+    const database = openDatabase();
+    try {
+      const row = database.prepare(`
+        SELECT url, original_title, original_excerpt, content_text, title, summary, implication
+        FROM articles WHERE url = ?
+      `).get(articleUrl);
+      assert.equal(state.deepSeekCalls, 1);
+      assert.equal(result.acceptedCount, 1);
+      assert.deepEqual({
+        url: row.url,
+        originalTitle: row.original_title,
+        originalExcerpt: row.original_excerpt,
+        contentText: row.content_text,
+      }, {
+        url: articleUrl,
+        originalTitle,
+        originalExcerpt,
+        contentText: originalContent,
+      }, "原始证据字段必须保持来源语言和原始 URL，不能被中文编辑覆盖");
+      for (const field of ["title", "summary", "implication"]) {
+        assert.match(row[field], /[\u3400-\u9fff]/, `公开 ${field} 必须是中文编辑结果`);
+      }
+      const { buildSnapshot } = await import("../radar/snapshot.mjs");
+      const snapshot = await buildSnapshot(database);
+      assert.equal(snapshot.signals[0].title, "Agent Harness 补充可恢复检查点实现");
+      assert.equal(snapshot.signals[0].sources[0].href, articleUrl);
+      assert.equal(snapshot.signals[0].sources[0].originalTitle, originalTitle);
+    } finally {
+      database.close();
+    }
   } finally {
     globalThis.fetch = originalFetch;
     restoreEnvironment();
@@ -1536,8 +1962,8 @@ test("SQLite article writes are idempotent", async () => {
     url: "https://example.com/agent", sourceId: "test-source", sourceName: "Test", sourceClass: "一手工程",
     independentGroup: "test", originalTitle: "Agent Harness", originalExcerpt: "Evidence", contentText: "Evidence",
     publishedAt: "2026-08-01T00:00:00.000Z", discoveredAt: "2026-08-01T01:00:00.000Z", contentHash: "hash",
-    relevanceScore: 10, signalSlug, conceptSlug: "agent-harness", title: "Agent Harness",
-    summary: "A sufficiently long evidence summary for the test.", implication: "A sufficiently long engineering implication for the test.",
+    relevanceScore: 10, signalSlug, conceptSlug: "agent-harness", title: "智能体运行底座新增恢复能力",
+    summary: "该工程记录验证了智能体运行底座的核心能力与证据链。", implication: "工程团队应据此评估恢复机制并补充相应运行验证。",
     topic: "工程", stage: "Validated", accent: "engineering", tags: ["agent-harness"], analysisMode: "deepseek",
   };
   assert.equal(insertArticle(database, article), true);
@@ -1580,6 +2006,659 @@ test("SQLite article writes are idempotent", async () => {
   );
   database.close();
 });
+
+test("snapshot withholds rules-only English display prose until LLM backfill succeeds", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-english-rules-hidden-"));
+  process.env.RADAR_DATA_DIR = isolatedDataDirectory;
+  const { insertArticle, openDatabase, upsertSourceCatalog } = await import("../radar/database.mjs");
+  const { buildSnapshot } = await import("../radar/snapshot.mjs");
+  const database = openDatabase();
+  const source = {
+    id: "english-rules-official",
+    name: "Official Runtime Team",
+    homepage: "https://example.com/runtime",
+    class: "一手工程",
+    priority: "P0",
+    cadence: "4h",
+    focus: "Agent Harness",
+    independentGroup: "english-rules-official",
+    layer: "official",
+    language: "en",
+  };
+  try {
+    upsertSourceCatalog(database, [source]);
+    assert.equal(insertArticle(database, {
+      url: "https://example.com/runtime/english-rules",
+      sourceId: source.id,
+      sourceName: source.name,
+      sourceClass: source.class,
+      independentGroup: source.independentGroup,
+      sourceLayer: source.layer,
+      sourceLanguage: source.language,
+      originalTitle: "Agent Harness adds durable checkpoint recovery",
+      originalExcerpt: "Official evidence for checkpoints and tool-call replay.",
+      contentText: "Official evidence for checkpoints and tool-call replay.",
+      publishedAt: "2026-08-02T01:00:00.000Z",
+      discoveredAt: "2026-08-02T01:05:00.000Z",
+      contentHash: "english-rules-only",
+      relevanceScore: 10,
+      signalSlug: "english-rules-only-signal",
+      conceptSlug: "agent-harness",
+      title: "Agent Harness adds durable checkpoint recovery",
+      summary: "The runtime now persists checkpoints and replays failed tool calls.",
+      implication: "Teams should validate restart safety and permission boundaries.",
+      topic: "工程",
+      stage: "Emerging",
+      accent: "engineering",
+      tags: ["agent-harness", "durable-execution"],
+      analysisMode: "rules",
+      publishDecision: "publish",
+    }), true);
+
+    const snapshot = await buildSnapshot(database);
+    assert.equal(
+      snapshot.signals.some((signal) => signal.slug === "english-rules-only-signal"),
+      false,
+      "尚未完成中文 LLM 编辑的英文 rules 记录不能进入公开信号",
+    );
+    const row = database.prepare("SELECT original_title, original_excerpt, content_text, url FROM articles WHERE signal_slug = ?").get("english-rules-only-signal");
+    assert.equal(row.original_title, "Agent Harness adds durable checkpoint recovery", "隐藏公开展示不能删除原始证据");
+  } finally {
+    database.close();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("historical analysis backfill selects only rules and leaves invalid DeepSeek history for readiness containment", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-deepseek-history-containment-"));
+  process.env.RADAR_DATA_DIR = isolatedDataDirectory;
+  const { insertArticle, openDatabase, upsertSourceCatalog } = await import("../radar/database.mjs");
+  const { runAnalysisBackfill } = await import("../radar/backfill.mjs");
+  const { buildSnapshot } = await import("../radar/snapshot.mjs");
+  const database = openDatabase();
+  const source = {
+    id: "invalid-deepseek-history",
+    name: "Historical DeepSeek Source",
+    homepage: "https://deepseek-history.example.com",
+    class: "一手工程",
+    priority: "P0",
+    cadence: "4h",
+    focus: "Agent Harness",
+    independentGroup: "invalid-deepseek-history",
+    layer: "official",
+    language: "ja",
+  };
+  const originalEditorial = {
+    title: "Claude Code が復旧可能なタスク実行を追加",
+    summary: "公式チームは長時間のタスク向けに復旧機能を追加したと説明しています。",
+    implication: "導入前に権限境界と中断からの復旧を検証する必要があります。",
+  };
+  const url = "https://deepseek-history.example.com/recovery";
+  try {
+    upsertSourceCatalog(database, [source]);
+    assert.equal(insertArticle(database, {
+      url,
+      sourceId: source.id,
+      sourceName: source.name,
+      sourceClass: source.class,
+      independentGroup: source.independentGroup,
+      sourceLayer: source.layer,
+      sourceLanguage: source.language,
+      originalTitle: "Claude Code の復旧機能",
+      originalExcerpt: "日本語の公式説明です。",
+      contentText: "チェックポイント、承認、復旧機能の説明です。",
+      publishedAt: "2026-08-02T01:00:00.000Z",
+      discoveredAt: "2026-08-02T01:05:00.000Z",
+      contentHash: "invalid-deepseek-history-v1",
+      relevanceScore: 10,
+      signalSlug: "invalid-deepseek-history",
+      conceptSlug: "agent-harness",
+      ...originalEditorial,
+      topic: "工程",
+      stage: "Emerging",
+      accent: "engineering",
+      tags: ["agent-harness"],
+      analysisMode: "deepseek",
+      publishDecision: "publish",
+    }), true);
+
+    let analysisCalls = 0;
+    const result = await runAnalysisBackfill({
+      database,
+      concurrency: 2,
+      logger: { info() {}, warn() {}, error() {} },
+      analyze: async () => {
+        analysisCalls += 1;
+        return { ...deepSeekPublishAnalysis("不应重跑的历史 DeepSeek 记录"), analysisMode: "deepseek" };
+      },
+    });
+
+    assert.equal(analysisCalls, 0, "historical backfill 只能重跑 analysis_mode=rules，不能重新解释既有 DeepSeek 记录");
+    assert.equal(result.backlogCount, 0);
+    assert.equal(result.updatedCount, 0);
+    const stored = database.prepare("SELECT title, summary, implication, analysis_mode FROM articles WHERE url = ?").get(url);
+    assert.deepEqual({ ...stored }, {
+      ...originalEditorial,
+      analysis_mode: "deepseek",
+    }, "非中文 DeepSeek 历史记录应保持原状，交由 readiness/人工修复处置");
+    const snapshot = await buildSnapshot(database);
+    assert.equal(snapshot.signals.some((signal) => signal.slug === "invalid-deepseek-history"), false, "不合格 DeepSeek 历史记录仍不得公开");
+  } finally {
+    database.close();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("snapshot representative prefers Chinese LLM editing without weakening source-layer evidence", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-llm-representative-"));
+  process.env.RADAR_DATA_DIR = isolatedDataDirectory;
+  const { insertArticle, openDatabase, upsertSourceCatalog } = await import("../radar/database.mjs");
+  const { buildSnapshot } = await import("../radar/snapshot.mjs");
+  const database = openDatabase();
+  const signalSlug = "agent-harness-bilingual-representative";
+  const sources = [
+    {
+      id: "representative-official",
+      name: "Official Runtime Team",
+      homepage: "https://official.example.com",
+      class: "一手工程",
+      priority: "P0",
+      cadence: "4h",
+      focus: "Agent Harness",
+      independentGroup: "representative-official",
+      layer: "official",
+      language: "en",
+    },
+    {
+      id: "representative-community",
+      name: "Agent Engineering Community",
+      homepage: "https://community.example.com",
+      class: "英文社区",
+      priority: "P2",
+      cadence: "4h",
+      focus: "Agent Harness",
+      independentGroup: "representative-community",
+      layer: "community",
+      language: "en",
+    },
+  ];
+  try {
+    upsertSourceCatalog(database, sources);
+    const base = {
+      relevanceScore: 10,
+      signalSlug,
+      conceptSlug: "agent-harness",
+      topic: "工程",
+      stage: "Emerging",
+      accent: "engineering",
+      tags: ["agent-harness", "durable-execution"],
+      publishDecision: "publish",
+    };
+    assert.equal(insertArticle(database, {
+      ...base,
+      url: "https://official.example.com/runtime-update",
+      sourceId: sources[0].id,
+      sourceName: sources[0].name,
+      sourceClass: sources[0].class,
+      independentGroup: sources[0].independentGroup,
+      sourceLayer: sources[0].layer,
+      sourceLanguage: sources[0].language,
+      originalTitle: "Agent Harness adds durable recovery",
+      originalExcerpt: "Official implementation evidence.",
+      contentText: "Official implementation evidence.",
+      publishedAt: "2026-08-02T01:00:00.000Z",
+      discoveredAt: "2026-08-02T01:05:00.000Z",
+      contentHash: "representative-official-rules",
+      title: "Agent Harness adds durable recovery",
+      summary: "The official runtime persists checkpoints and replays tool calls.",
+      implication: "Teams should verify recovery before deployment.",
+      analysisMode: "rules",
+      editorialScore: 90,
+      evidenceScore: 90,
+    }), true);
+    assert.equal(insertArticle(database, {
+      ...base,
+      url: "https://community.example.com/runtime-review",
+      sourceId: sources[1].id,
+      sourceName: sources[1].name,
+      sourceClass: sources[1].class,
+      independentGroup: sources[1].independentGroup,
+      sourceLayer: sources[1].layer,
+      sourceLanguage: sources[1].language,
+      originalTitle: "Independent review of Agent Harness recovery",
+      originalExcerpt: "Independent review evidence.",
+      contentText: "Independent review evidence.",
+      publishedAt: "2026-08-02T01:10:00.000Z",
+      discoveredAt: "2026-08-02T01:15:00.000Z",
+      contentHash: "representative-community-deepseek",
+      title: "Agent Harness 补充可恢复执行证据",
+      summary: "独立材料说明检查点、工具调用重放与失败恢复机制，但仍需继续验证生产采用情况。",
+      implication: "应把中断恢复、幂等重试和权限边界纳入发布前验收。",
+      analysisMode: "deepseek",
+      editorialScore: 75,
+      evidenceScore: 50,
+    }), true);
+
+    const snapshot = await buildSnapshot(database);
+    const signal = snapshot.signals.find((item) => item.slug === signalSlug);
+    assert.ok(signal);
+    assert.equal(signal.title, "Agent Harness 补充可恢复执行证据", "官方来源层级不能让 rules 英文展示覆盖 LLM 中文编辑");
+    assert.equal(signal.analysisMode, "deepseek");
+    assert.deepEqual(signal.sourceMix, { official: 1, practitioner: 0, community: 1 }, "证据层级仍须独立参与可信度计算");
+    assert.equal(signal.verificationState, "cross-verified");
+    assert.equal(signal.confidence, "较高");
+    assert.equal(signal.sources[0].layer, "official", "原文证据列表仍应把官方来源置前");
+    assert.deepEqual(new Set(signal.sources.map((source) => source.href)), new Set([
+      "https://official.example.com/runtime-update",
+      "https://community.example.com/runtime-review",
+    ]));
+  } finally {
+    database.close();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("LLM analysis backfill preserves source evidence, resumes failures, and is idempotent", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-analysis-backfill-"));
+  process.env.RADAR_DATA_DIR = isolatedDataDirectory;
+  const { insertArticle, openDatabase, upsertSourceCatalog } = await import("../radar/database.mjs");
+  const database = openDatabase();
+  const source = {
+    id: "backfill-official",
+    name: "Official Agent Runtime",
+    homepage: "https://backfill.example.com",
+    class: "一手工程",
+    priority: "P0",
+    cadence: "4h",
+    focus: "Agent Harness",
+    independentGroup: "backfill-official",
+    layer: "official",
+    language: "en",
+  };
+  const rows = [
+    {
+      url: "https://backfill.example.com/recovery-a",
+      originalTitle: "Agent Harness recovery note A",
+      originalExcerpt: "English source excerpt A with checkpoints and tool calls.",
+      contentText: "English source body A documents checkpoints, tool calls, approvals, and replay.",
+      contentHash: "backfill-source-hash-a",
+      signalSlug: "backfill-signal-a",
+    },
+    {
+      url: "https://backfill.example.com/recovery-b",
+      originalTitle: "Agent Harness recovery note B",
+      originalExcerpt: "English source excerpt B with checkpoints and tool calls.",
+      contentText: "English source body B documents checkpoints, tool calls, approvals, and replay.",
+      contentHash: "backfill-source-hash-b",
+      signalSlug: "backfill-signal-b",
+    },
+  ];
+
+  try {
+    upsertSourceCatalog(database, [source]);
+    for (const [index, row] of rows.entries()) {
+      assert.equal(insertArticle(database, {
+        ...row,
+        sourceId: source.id,
+        sourceName: source.name,
+        sourceClass: source.class,
+        independentGroup: source.independentGroup,
+        sourceLayer: source.layer,
+        sourceLanguage: source.language,
+        publishedAt: `2026-08-02T0${index + 1}:00:00.000Z`,
+        discoveredAt: `2026-08-02T0${index + 1}:05:00.000Z`,
+        relevanceScore: 10,
+        conceptSlug: "agent-harness",
+        title: row.originalTitle,
+        summary: row.originalExcerpt,
+        implication: "Teams should validate recovery before production use.",
+        topic: "工程",
+        stage: "Emerging",
+        accent: "engineering",
+        tags: ["agent-harness", "durable-execution"],
+        analysisMode: "rules",
+        publishDecision: "publish",
+        editorialScore: 70,
+        aiRelevanceScore: 80,
+        noveltyScore: 60,
+        evidenceScore: 90,
+        eventKey: `backfill:event-${index + 1}`,
+        candidateConcept: "",
+      }), true);
+    }
+    const beforeFailure = database.prepare("SELECT * FROM articles WHERE url = ?").get(rows[1].url);
+    const { runAnalysisBackfill } = await import("../radar/backfill.mjs");
+    assert.equal(typeof runAnalysisBackfill, "function", "历史规则记录必须有显式批量回填入口");
+    const firstCalls = [];
+    await runAnalysisBackfill({
+      database,
+      concurrency: 2,
+      logger: { info() {}, warn() {}, error() {} },
+      analyze: async (item) => {
+        firstCalls.push(item.url);
+        const sourceRow = rows.find((row) => row.url === item.url);
+        assert.ok(sourceRow, "回填只能读取待处理的历史 rules publish 记录");
+        assert.deepEqual({
+          url: item.url,
+          title: item.title,
+          excerpt: item.excerpt,
+          contentText: item.contentText,
+        }, {
+          url: sourceRow.url,
+          title: sourceRow.originalTitle,
+          excerpt: sourceRow.originalExcerpt,
+          contentText: sourceRow.contentText,
+        }, "LLM 输入必须来自保留的原始证据字段");
+        if (item.url === rows[1].url) throw new Error("temporary provider failure");
+        return { ...deepSeekPublishAnalysis("Agent Harness 回填可恢复执行分析"), analysisMode: "deepseek" };
+      },
+    });
+    assert.deepEqual(new Set(firstCalls), new Set(rows.map((row) => row.url)), "本轮不能用发布上限截断待回填 LLM 调用");
+
+    const successful = database.prepare("SELECT * FROM articles WHERE url = ?").get(rows[0].url);
+    const failed = database.prepare("SELECT * FROM articles WHERE url = ?").get(rows[1].url);
+    assert.equal(successful.analysis_mode, "deepseek");
+    assert.equal(successful.title, "Agent Harness 回填可恢复执行分析");
+    assert.deepEqual({
+      url: successful.url,
+      originalTitle: successful.original_title,
+      originalExcerpt: successful.original_excerpt,
+      contentText: successful.content_text,
+      contentHash: successful.content_hash,
+    }, {
+      url: rows[0].url,
+      originalTitle: rows[0].originalTitle,
+      originalExcerpt: rows[0].originalExcerpt,
+      contentText: rows[0].contentText,
+      contentHash: rows[0].contentHash,
+    }, "成功回填只能更新分析字段，不能改 URL 或原始证据");
+    for (const field of ["title", "summary", "implication", "analysis_mode", "original_title", "original_excerpt", "content_text", "content_hash"]) {
+      assert.equal(failed[field], beforeFailure[field], `失败回填不得覆盖旧字段 ${field}`);
+    }
+
+    const { buildSnapshot } = await import("../radar/snapshot.mjs");
+    const firstSnapshot = await buildSnapshot(database);
+    const publicSignal = firstSnapshot.signals.find((signal) => signal.slug === rows[0].signalSlug);
+    assert.ok(publicSignal, "成功回填后信号必须恢复公开展示");
+    assert.equal(publicSignal.title, "Agent Harness 回填可恢复执行分析");
+    assert.equal(publicSignal.sources[0].href, rows[0].url, "中文展示必须保留原文跳转链接");
+    assert.equal(firstSnapshot.signals.some((signal) => signal.slug === rows[1].signalSlug), false, "失败的英文 rules 记录仍不能公开");
+
+    const resumeCalls = [];
+    await runAnalysisBackfill({
+      database,
+      concurrency: 2,
+      logger: { info() {}, warn() {}, error() {} },
+      analyze: async (item) => {
+        resumeCalls.push(item.url);
+        return { ...deepSeekPublishAnalysis("Agent Harness 补齐第二条中文分析"), analysisMode: "deepseek" };
+      },
+    });
+    assert.deepEqual(resumeCalls, [rows[1].url], "恢复执行只能重试失败记录，不能重复消费已成功回填项");
+
+    let thirdRunCalls = 0;
+    await runAnalysisBackfill({
+      database,
+      concurrency: 2,
+      logger: { info() {}, warn() {}, error() {} },
+      analyze: async () => {
+        thirdRunCalls += 1;
+        return { ...deepSeekPublishAnalysis("不应执行"), analysisMode: "deepseek" };
+      },
+    });
+    assert.equal(thirdRunCalls, 0, "所有规则记录完成后再次执行必须幂等为空操作");
+  } finally {
+    database.close();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("LLM analysis backfill honors configurable concurrency, has no item cap, and rejects parallel reentry", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-backfill-concurrency-"));
+  process.env.RADAR_DATA_DIR = isolatedDataDirectory;
+  const { insertArticle, openDatabase, upsertSourceCatalog } = await import("../radar/database.mjs");
+  const database = openDatabase();
+  const source = {
+    id: "backfill-concurrency-source",
+    name: "Backfill Source",
+    homepage: "https://backfill-concurrency.example.com",
+    class: "一手工程",
+    priority: "P0",
+    cadence: "4h",
+    focus: "Agent Harness",
+    independentGroup: "backfill-concurrency-source",
+  };
+  const seedRuleArticle = (index) => insertArticle(database, {
+    url: `https://backfill-concurrency.example.com/article-${index}`,
+    sourceId: source.id,
+    sourceName: source.name,
+    sourceClass: source.class,
+    independentGroup: source.independentGroup,
+    sourceLayer: "official",
+    sourceLanguage: "en",
+    originalTitle: `Agent Harness backfill article ${index}`,
+    originalExcerpt: "English recovery evidence.",
+    contentText: "English checkpoint, approval, and tool-call recovery evidence.",
+    publishedAt: `2026-08-02T${String(index).padStart(2, "0")}:00:00.000Z`,
+    discoveredAt: `2026-08-02T${String(index).padStart(2, "0")}:05:00.000Z`,
+    contentHash: `backfill-concurrency-${index}`,
+    relevanceScore: 10,
+    signalSlug: `backfill-concurrency-signal-${index}`,
+    conceptSlug: "agent-harness",
+    title: `Agent Harness backfill article ${index}`,
+    summary: "English recovery evidence.",
+    implication: "Validate recovery before production use.",
+    topic: "工程",
+    stage: "Emerging",
+    accent: "engineering",
+    tags: ["agent-harness"],
+    analysisMode: "rules",
+    publishDecision: "publish",
+  });
+
+  try {
+    upsertSourceCatalog(database, [source]);
+    for (let index = 1; index <= 5; index += 1) assert.equal(seedRuleArticle(index), true);
+    const { runAnalysisBackfill } = await import("../radar/backfill.mjs");
+    let active = 0;
+    let maximumActive = 0;
+    let calls = 0;
+    await runAnalysisBackfill({
+      database,
+      concurrency: 2,
+      logger: { info() {}, warn() {}, error() {} },
+      analyze: async () => {
+        calls += 1;
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        return { ...deepSeekPublishAnalysis(`第 ${calls} 条回填中文分析`), analysisMode: "deepseek" };
+      },
+    });
+    assert.equal(calls, 5, "一次显式回填必须处理全部待回填记录，不能套用采集发布上限");
+    assert.equal(maximumActive, 2, "回填必须严格遵守可配置并发");
+
+    assert.equal(seedRuleArticle(6), true);
+    let releaseFirst;
+    let markStarted;
+    const firstStarted = new Promise((resolve) => { markStarted = resolve; });
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    const running = runAnalysisBackfill({
+      database,
+      concurrency: 1,
+      logger: { info() {}, warn() {}, error() {} },
+      analyze: async () => {
+        markStarted();
+        await firstGate;
+        return { ...deepSeekPublishAnalysis("第六条回填中文分析"), analysisMode: "deepseek" };
+      },
+    });
+    await firstStarted;
+    try {
+      await assert.rejects(runAnalysisBackfill({
+        database,
+        concurrency: 1,
+        logger: { info() {}, warn() {}, error() {} },
+        analyze: async () => ({ ...deepSeekPublishAnalysis("并行重入不应执行"), analysisMode: "deepseek" }),
+      }), /backfill|回填|运行|重入|lock|busy/i, "同一数据库的回填任务不能并行重入");
+    } finally {
+      releaseFirst();
+    }
+    await running;
+  } finally {
+    database.close();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+for (const casScenario of [
+  {
+    name: "raw content hash changes",
+    mutate(database, row) {
+      database.prepare(`
+        UPDATE articles
+        SET content_hash = ?, title = ?, summary = ?, implication = ?
+        WHERE url = ?
+      `).run(
+        "cas-content-hash-v2",
+        "另一采集流程保留的新标题",
+        "另一采集流程已经写入了更新后的中文摘要，旧分析不得覆盖。",
+        "应基于新的原始内容重新分析，而不是提交过期分析结果。",
+        row.url,
+      );
+    },
+    expected: {
+      contentHash: "cas-content-hash-v2",
+      title: "另一采集流程保留的新标题",
+      analysisMode: "rules",
+    },
+  },
+  {
+    name: "editorial fields change without a content hash change",
+    mutate(database, row) {
+      database.prepare(`
+        UPDATE articles
+        SET title = ?, summary = ?, implication = ?, analysis_mode = ?
+        WHERE url = ?
+      `).run(
+        "另一模型已经提交可恢复任务分析",
+        "另一模型已经基于相同原文提交完整中文摘要，过期回填不得覆盖。",
+        "保留先完成的有效编辑结果，避免并发任务发生最后写入者覆盖。",
+        "openai",
+        row.url,
+      );
+    },
+    expected: {
+      contentHash: "cas-content-hash-v1",
+      title: "另一模型已经提交可恢复任务分析",
+      analysisMode: "openai",
+    },
+  },
+]) {
+  test(`analysis backfill CAS rejects stale writes when ${casScenario.name}`, async () => {
+    const previousDataDirectory = process.env.RADAR_DATA_DIR;
+    const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-backfill-cas-"));
+    process.env.RADAR_DATA_DIR = isolatedDataDirectory;
+    const { insertArticle, openDatabase, upsertSourceCatalog } = await import("../radar/database.mjs");
+    const databaseA = openDatabase();
+    const databaseB = openDatabase();
+    const source = {
+      id: "backfill-cas-source",
+      name: "Backfill CAS Source",
+      homepage: "https://backfill-cas.example.com",
+      class: "一手工程",
+      priority: "P0",
+      cadence: "4h",
+      focus: "Agent Harness",
+      independentGroup: "backfill-cas-source",
+    };
+    const row = {
+      url: "https://backfill-cas.example.com/recovery",
+      contentHash: "cas-content-hash-v1",
+    };
+    try {
+      upsertSourceCatalog(databaseA, [source]);
+      assert.equal(insertArticle(databaseA, {
+        url: row.url,
+        sourceId: source.id,
+        sourceName: source.name,
+        sourceClass: source.class,
+        independentGroup: source.independentGroup,
+        sourceLayer: "official",
+        sourceLanguage: "en",
+        originalTitle: "Agent Harness recovery note",
+        originalExcerpt: "English recovery evidence.",
+        contentText: "English checkpoints, approvals, and tool-call replay evidence.",
+        publishedAt: "2026-08-02T01:00:00.000Z",
+        discoveredAt: "2026-08-02T01:05:00.000Z",
+        contentHash: row.contentHash,
+        relevanceScore: 10,
+        signalSlug: "backfill-cas-signal",
+        conceptSlug: "agent-harness",
+        title: "Agent Harness recovery note",
+        summary: "English recovery evidence.",
+        implication: "Validate recovery before production use.",
+        topic: "工程",
+        stage: "Emerging",
+        accent: "engineering",
+        tags: ["agent-harness"],
+        analysisMode: "rules",
+        publishDecision: "publish",
+      }), true);
+
+      const { runAnalysisBackfill } = await import("../radar/backfill.mjs");
+      let announceStarted;
+      let releaseAnalysis;
+      const started = new Promise((resolve) => { announceStarted = resolve; });
+      const gate = new Promise((resolve) => { releaseAnalysis = resolve; });
+      const running = runAnalysisBackfill({
+        database: databaseA,
+        concurrency: 1,
+        logger: { info() {}, warn() {}, error() {} },
+        analyze: async () => {
+          announceStarted();
+          await gate;
+          return { ...deepSeekPublishAnalysis("过期回填不应覆盖并发更新"), analysisMode: "deepseek" };
+        },
+      });
+      await started;
+      casScenario.mutate(databaseB, row);
+      releaseAnalysis();
+      const result = await running;
+
+      assert.equal(result.updatedCount, 0, "读取之后发生并发变化时不能提交过期 LLM 结果");
+      assert.equal(result.conflictCount, 1, "并发变化必须作为 CAS conflict 明确返回");
+      const stored = databaseB.prepare("SELECT content_hash, title, analysis_mode FROM articles WHERE url = ?").get(row.url);
+      assert.deepEqual({ ...stored }, {
+        content_hash: casScenario.expected.contentHash,
+        title: casScenario.expected.title,
+        analysis_mode: casScenario.expected.analysisMode,
+      }, "CAS 未命中时必须完整保留另一连接已经提交的记录");
+    } finally {
+      databaseB.close();
+      databaseA.close();
+      if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+      else process.env.RADAR_DATA_DIR = previousDataDirectory;
+      await rm(isolatedDataDirectory, { recursive: true, force: true });
+    }
+  });
+}
 
 test("snapshot source health only includes the current enabled catalog after catalog shrink", async () => {
   const previousDataDirectory = process.env.RADAR_DATA_DIR;
@@ -1987,6 +3066,71 @@ test("snapshot keeps the latest eight source articles for one signal", async () 
   }
 });
 
+test("snapshot source cap always preserves the selected representative article URL", async () => {
+  const { insertArticle, openDatabase, upsertSourceCatalog } = await import("../radar/database.mjs");
+  const { buildSnapshot } = await import("../radar/snapshot.mjs");
+  const database = openDatabase();
+  const source = {
+    id: "representative-source-cap-test",
+    name: "Representative Source Cap Test",
+    homepage: "https://representative-cap.example.com",
+    class: "一手工程",
+    priority: "P0",
+    cadence: "4h",
+    focus: "Agent Harness",
+    independentGroup: "representative-source-cap-test",
+    layer: "official",
+    language: "en",
+  };
+  const representativeUrl = "https://representative-cap.example.com/evidence-1";
+  upsertSourceCatalog(database, [source]);
+  try {
+    for (let index = 1; index <= 9; index += 1) {
+      const suffix = String(index).padStart(2, "0");
+      assert.equal(insertArticle(database, {
+        url: `https://representative-cap.example.com/evidence-${index}`,
+        sourceId: source.id,
+        sourceName: source.name,
+        sourceClass: source.class,
+        independentGroup: source.independentGroup,
+        sourceLayer: source.layer,
+        sourceLanguage: source.language,
+        originalTitle: `Agent Harness source evidence ${index}`,
+        originalExcerpt: `Official evidence ${index}`,
+        contentText: `Official evidence ${index}`,
+        publishedAt: `2026-09-${suffix}T00:00:00.000Z`,
+        discoveredAt: `2026-09-${suffix}T01:00:00.000Z`,
+        contentHash: `representative-source-cap-${index}`,
+        relevanceScore: 10,
+        signalSlug: "agent-harness-representative-source-cap",
+        conceptSlug: "agent-harness",
+        title: index === 1 ? "被选中的中文代表文章" : `同组中文证据文章 ${index}`,
+        summary: "官方材料说明检查点、审批和恢复机制。",
+        implication: "团队需要保留原文链接并验证工程边界。",
+        topic: "工程",
+        stage: "Validated",
+        accent: "evidence",
+        tags: ["agent-harness"],
+        analysisMode: "deepseek",
+        publishDecision: "publish",
+        editorialScore: index === 1 ? 99 : 10,
+      }), true);
+    }
+
+    const snapshot = await buildSnapshot(database);
+    const signal = snapshot.signals.find((item) => item.slug === "agent-harness-representative-source-cap");
+    assert.ok(signal);
+    assert.equal(signal.title, "被选中的中文代表文章", "fixture 必须确认最旧文章确实被选为展示代表");
+    assert.equal(signal.sources.length, 8, "公开来源仍可维持 8 条上限");
+    assert.ok(
+      signal.sources.some((item) => item.href === representativeUrl),
+      "来源裁剪必须保留生成公开标题、摘要和工程含义的 representative 原文",
+    );
+  } finally {
+    database.close();
+  }
+});
+
 test("community-only independent groups cannot self-upgrade to high confidence", async () => {
   const { insertArticle, openDatabase, upsertSourceCatalog } = await import("../radar/database.mjs");
   const { buildSnapshot } = await import("../radar/snapshot.mjs");
@@ -2021,7 +3165,7 @@ test("community-only independent groups cannot self-upgrade to high confidence",
         stage: "Spark",
         accent: "signal",
         tags: ["multi-agent-orchestration"],
-        analysisMode: "rules",
+        analysisMode: "deepseek",
       }), true);
     }
     const snapshot = await buildSnapshot(database);

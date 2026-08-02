@@ -12,6 +12,8 @@
     "test": "npm run test:unit && npm run build && node --test tests/rendered-html.test.mjs",
     "test:unit": "node --test tests/radar-pipeline.test.mjs tests/deployment-scripts.test.mjs tests/graph-geometry.test.mjs",
     "ingest": "node --no-warnings scripts/ingest.mjs --trigger manual",
+    "editorial:backfill": "node --no-warnings scripts/backfill-analysis.mjs",
+    "editorial:check": "node --no-warnings scripts/check-editorial-readiness.mjs",
     "ai:check": "node --no-warnings scripts/check-ai.mjs",
     "radar:status": "node --no-warnings scripts/status.mjs",
     "lint": "eslint . --ignore-pattern .next"

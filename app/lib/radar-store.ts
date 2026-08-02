@@ -38,10 +38,35 @@ function normalizedRunAnalysisMode(status: RadarSnapshot["status"]): NonNullable
     : "none";
 }
 
+function unavailableRadarSnapshot(runStatus: RadarSnapshot["status"]["runStatus"]): RadarSnapshot {
+  return {
+    ...seedRadarSnapshot,
+    status: {
+      ...seedRadarSnapshot.status,
+      generatedAt: new Date().toISOString(),
+      runStatus,
+      analysisMode: "rules",
+      configuredProvider: resolveAnalysisProvider(),
+      runAnalysisMode: "none",
+      sourceCount: 0,
+      healthySourceCount: 0,
+      signalCount: 0,
+      articleCount: 0,
+      stale: true,
+    },
+    signals: [],
+    candidateConcepts: [],
+    modelPulses: [],
+    sources: [],
+    digests: [],
+  };
+}
+
 export async function getRadarSnapshot(): Promise<RadarSnapshot> {
   try {
     const parsed: unknown = JSON.parse(await readFile(snapshotPath(), "utf8"));
     if (!isSnapshot(parsed)) throw new Error("快照结构无效");
+    if (parsed.status.mode !== "live") return unavailableRadarSnapshot("never");
     const lastSuccessfulAt = parsed.status.lastSuccessfulAt ? new Date(parsed.status.lastSuccessfulAt).getTime() : 0;
     return {
       ...parsed,
@@ -59,14 +84,7 @@ export async function getRadarSnapshot(): Promise<RadarSnapshot> {
       candidateConcepts: parsed.candidateConcepts || [],
     };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return seedRadarSnapshot;
-    return {
-      ...seedRadarSnapshot,
-      status: {
-        ...seedRadarSnapshot.status,
-        runStatus: "failed",
-        stale: true,
-      },
-    };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return unavailableRadarSnapshot("never");
+    return unavailableRadarSnapshot("failed");
   }
 }

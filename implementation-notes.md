@@ -253,7 +253,7 @@
 - `candidate_concept` was persisted but never consumed, while `watch` items were discarded before persistence. A watch item with a non-empty candidate is now retained as an isolated discovery record: it appears only in `/concepts` under “待溯源概念候选”, preserves evidence-layered original links, and cannot enter signals or the canonical concept grid.
 - A 375px browser check found that the hidden accessible text inside the wide model table could enlarge the document scroll geometry even though the table had its own scroll container. Root horizontal overflow is clipped while the navigation and exact table retain their explicit horizontal scroll regions.
 - A first SSRF guard validated DNS before calling `fetch`, which left a rebinding window and missed hexadecimal IPv4-mapped IPv6 forms such as `::ffff:7f00:1`. Every HTTPS hop now parses IPv6 into bytes, rejects mapped private/loopback ranges, and passes the already-validated address set to a pinned Undici dispatcher used by the real TLS connection. Test-only fetch injection is explicit and cannot fabricate a public resolver. Each dispatcher is intentionally closed after its bounded response instead of sharing address state across source lifecycles; non-success and oversized bodies are cancelled, and unframed streams stop at the 5 MiB boundary.
-- The enrichment cap originally doubled as the final publication cap. Once enabled sources outgrow that cap, later sources could be starved before their article bodies were inspected. Fair selection now takes at least the first candidate from every due source; the final publish cap remains independent, while the default AI calls remain bounded by that publish cap and `RADAR_MAX_AI_ITEMS` can lower it further.
+- The enrichment cap originally doubled as the final publication cap. Once enabled sources outgrow that cap, later sources could be starved before their article bodies were inspected. Fair selection now takes at least the first candidate from every due source. Historical note: the later LLM Chinese editorial session superseded the AI-call cap entirely; the final publication cap remains, but every selected relevant candidate now enters the configured LLM.
 - A persisted `watch` candidate could be promoted in place but could not be withdrawn after a later `reject` decision. Rejection now refreshes the same audit row with the reviewed body, hash and scores, clears its candidate name, and removes it from public/candidate snapshot queries without deleting history. `reject` is terminal for that URL, while `watch` remains re-reviewable; only published rows may seed signal clustering.
 
 ### Session summary
@@ -313,3 +313,38 @@
 - Edge cases found: 5; IPv6-only failure, async socket containment, multi-address fallback, zero-analysis runs and interrupted SQLite migration are covered.
 - Questions awaiting review: 0.
 - Next session should read this section, `radar/fetch.mjs`, `radar/database.mjs` and the new ingestion/status tests before changing transport or status semantics.
+
+## LLM Chinese editorial backfill session
+
+### Deviations
+
+- Earlier sessions intentionally left historical `rules` articles unchanged. The product requirement is now corrected: every public card must use an LLM-produced Chinese editorial title, summary and engineering reading, while the original-language text remains evidence metadata behind the original link. This session therefore adds an explicit historical backfill instead of treating provider history as immutable.
+- The previous cost guard allowed enriched candidates beyond `RADAR_MAX_AI_ITEMS` to fall back to rules. That is incompatible with the corrected publication contract, so every discovered candidate is eligible for body enrichment, every relevant enriched candidate is sent through the configured LLM, and only final publication remains capped; revisit cost controls only as explicit queue admission, never as a raw-prose publishing fallback.
+
+### Discovered edge cases
+
+- `runAnalysisMode=deepseek` describes only articles analyzed during one run; it cannot prove that previously published `rules` rows have been re-edited.
+- The existing published-URL terminal deduplication prevents normal ingestion from revisiting historical `rules` rows, so a dedicated idempotent backfill path is required.
+- Evidence source priority and editorial-display priority are different concerns: official/practitioner/community weighting may affect confidence, but must not allow a raw-language fallback to become the card title or summary.
+- A provider outage may preserve collection availability, but its rules fallback is not publication-ready. The item must stay unpublished and retryable instead of leaking original-language prose into the public snapshot.
+- A signal may contain an unedited official article and an edited community article. The LLM-ready article supplies the card prose, while every article still contributes its original link and evidence layer to confidence; editorial readiness must not rewrite evidence authority.
+- Backfill and ingestion can each produce a valid atomic snapshot yet still race by publication order. They now hold the same process lock for their full run, while individual model calls never hold a SQLite transaction.
+- A stale-lock observer can resume after another process has already installed a new owner at the same path. Reclaim now takes an observation-bound claim and rechecks directory identity plus PID/start time/token before moving anything, so an obsolete observer cannot delete the new owner.
+- Counting only Han and Latin characters lets Korean, Cyrillic or Arabic prose plus a short Chinese suffix pass. The editorial ratio now uses every Unicode letter as its denominator while still allowing product names, acronyms and semantic versions.
+- A partial backfill updates successful SQLite rows before returning nonzero. The global readiness gate therefore lives in the only snapshot writer, not only in the backfill CLI, so a later ingestion run cannot publish a half-migrated projection.
+- Missing, corrupt or seed snapshots previously exposed curated starter signals. Runtime fallback now keeps only static navigation/reference material and fails closed with zero public signals; process startup requires a nonempty database and a valid live snapshot.
+- A publication limit applied before enrichment silently starves additional relevant items from one source. All discovered candidates now receive fair full enrichment and every relevant enriched item reaches the LLM; the limit is applied only to final publication.
+- A signal with more than eight evidence rows can choose an older high-quality representative whose URL falls outside the normal source window. The public source window keeps evidence-authority ordering and, only when necessary, replaces its final slot with the representative article so the displayed synthesis always retains its exact original link.
+- PID liveness alone is not lock ownership because the operating system can reuse a crashed owner's PID. New owners and reclaim claims persist a process-start identity (`/proc` starttime on Linux, controlled `ps` lstart on Unix); a mismatched identity is stale, while legacy or unverifiable identities fail safe as live.
+
+### Questions for review
+
+- None. The user explicitly approved unrestricted LLM use for the backfill; credentials remain server-owned and original URLs/text must be retained.
+
+### Session summary
+
+- Deviations count: 2.
+- Most likely revisit: add prompt/model version metadata only when a future editorial contract requires explicitly reprocessing already-valid LLM rows; the current migration deliberately targets only `analysis_mode=rules` without adding a job schema.
+- Edge cases found: 13; historical terminal URL deduplication, provider-status ambiguity, evidence/editorial priority, provider failure, resumable CAS updates, snapshot writer races, stale-lock ABA, PID reuse, non-Latin language bypass, partial-migration publication, unavailable snapshot fallback, pre-analysis publication caps and representative-link truncation are handled.
+- Questions awaiting review: 0.
+- Next session should read this section, `radar/editorial.mjs`, `radar/backfill.mjs` and `scripts/backfill-analysis.mjs` before changing publication readiness or historical migration.
