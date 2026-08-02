@@ -13,6 +13,7 @@ import {
 } from "../lib/model-data";
 import type { ModelLandscapePoint, ModelPulse } from "../lib/radar-data";
 import { getRadarSnapshot } from "../lib/radar-store";
+import { ModelLandscapeChart, type LandscapePlotModel } from "./ModelLandscapeChart";
 
 export const dynamic = "force-dynamic";
 
@@ -79,7 +80,7 @@ function familyKey(model: ModelLandscapePoint) {
   return `${model.providerSlug}:${model.shortName.toLowerCase().replace(/\s*\((?:low|medium|high|max|xhigh|thinking|reasoning)[^)]*\)\s*$/i, "").trim()}`;
 }
 
-function providerShape(model: ModelLandscapePoint) {
+function providerShape(model: ModelLandscapePoint): LandscapePlotModel["shape"] {
   if (model.isOpenWeights) return "diamond";
   if (model.isReasoning) return "circle";
   return "square";
@@ -159,44 +160,31 @@ export default async function ModelsPage() {
     radius: radiusForIntelligence(model.intelligenceIndex),
     color: providerColor(model.providerName),
     shape: providerShape(model),
+    family: familyKey(model),
+    costLabel: costLabel(model.costPerTask),
   }));
   const costTicks = logTicks(costDomain.min, costDomain.max);
   const codingTicks = Array.from(
     { length: Math.floor((codingDomain.max - codingDomain.min) / 10) + 1 },
     (_, index) => codingDomain.min + index * 10,
   );
-  const families = [...plottedModels.reduce((groups, model) => {
-    const key = familyKey(model);
-    const group = groups.get(key) || [];
-    group.push(model);
-    groups.set(key, group);
-    return groups;
-  }, new Map<string, typeof plottedModels>()).values()].filter((models) => models.length > 1);
-  const occupiedLabels: Array<{ left: number; right: number; top: number; bottom: number }> = [];
-  const labelPlacements = new Map<string, { x: number; y: number; anchor: "start" | "end"; showMeta: boolean }>();
-  const labelOffsets: Array<{ dx: number; dy: number; anchor: "start" | "end" }> = [
-    { dx: 10, dy: -9, anchor: "start" }, { dx: 10, dy: 21, anchor: "start" },
-    { dx: -10, dy: -9, anchor: "end" }, { dx: -10, dy: 21, anchor: "end" },
-  ];
-  for (const [index, model] of plottedModels.slice(0, 92).entries()) {
-    const width = Math.min(150, Math.max(45, model.shortName.length * 6.1));
-    for (const offset of labelOffsets) {
-      const x = model.x + offset.dx;
-      const y = model.y + offset.dy;
-      const box = {
-        left: offset.anchor === "start" ? x : x - width,
-        right: offset.anchor === "start" ? x + width : x,
-        top: y - 11,
-        bottom: y + (index < 28 ? 15 : 2),
-      };
-      const inside = box.left >= landscape.left && box.right <= landscape.right && box.top >= landscape.top && box.bottom <= landscape.bottom;
-      const overlaps = occupiedLabels.some((other) => !(box.right + 3 < other.left || box.left - 3 > other.right || box.bottom + 2 < other.top || box.top - 2 > other.bottom));
-      if (!inside || overlaps) continue;
-      occupiedLabels.push(box);
-      labelPlacements.set(model.id, { x, y, anchor: offset.anchor, showMeta: index < 28 });
-      break;
-    }
-  }
+  const chartModels: LandscapePlotModel[] = plottedModels.map((model) => ({
+    id: model.id,
+    name: model.name,
+    shortName: model.shortName,
+    providerName: model.providerName,
+    codingIndex: model.codingIndex,
+    intelligenceIndex: model.intelligenceIndex,
+    costPerTask: model.costPerTask,
+    costLabel: model.costLabel,
+    href: model.href,
+    x: model.x,
+    y: model.y,
+    radius: model.radius,
+    color: model.color,
+    shape: model.shape,
+    family: model.family,
+  }));
 
   return (
     <AppShell active="models" status={snapshot.status}>
@@ -243,59 +231,12 @@ export default async function ModelsPage() {
               <p><i aria-hidden="true" />点越大，通用智能指数越高</p>
             </div>
             {marketModels.length > 0 && <>
-              <p className="model-landscape-scroll-cue"><span aria-hidden="true">↔</span> 横向滑动查看完整模型分布</p>
-              <div className="model-landscape-scroll" tabIndex={0} aria-label="模型能力成本全景图，可横向滚动">
-              <svg className="model-landscape-plot" viewBox="0 0 1600 820" role="img" aria-labelledby="model-landscape-title model-landscape-description">
-                <title id="model-landscape-title">动态模型编程能力—成本全景</title>
-                <desc id="model-landscape-description">横轴为 Artificial Analysis Intelligence Index 的美元单任务成本，对数刻度；纵轴为编程指数；点面积为通用智能指数；颜色区分厂商，菱形表示开源权重。</desc>
-                <g className="model-chart-grid" aria-hidden="true">
-                  {codingTicks.map((score) => {
-                    const y = yForCoding(score);
-                    return <g key={score}><line x1={landscape.left} x2={landscape.right} y1={y} y2={y} /><text x={landscape.left - 14} y={y + 4} textAnchor="end">{score}</text></g>;
-                  })}
-                  {costTicks.map((price) => {
-                    const x = xForCost(price);
-                    return <g key={price}><line x1={x} x2={x} y1={landscape.top} y2={landscape.bottom} /><text x={x} y={landscape.bottom + 28} textAnchor="middle">{costLabel(price)}</text></g>;
-                  })}
-                </g>
-                <g className="model-chart-axes" aria-hidden="true">
-                  <line x1={landscape.left} x2={landscape.left} y1={landscape.top} y2={landscape.bottom} />
-                  <line x1={landscape.left} x2={landscape.right} y1={landscape.bottom} y2={landscape.bottom} />
-                  <text x={(landscape.left + landscape.right) / 2} y="784" textAnchor="middle">单任务成本（USD，对数刻度）</text>
-                  <text transform="rotate(-90 34 390)" x="34" y="390" textAnchor="middle">编程指数</text>
-                </g>
-                <g className="model-provider-lines" aria-hidden="true">
-                  {families.map((points) => <polyline style={{ stroke: points[0].color }} points={points.sort((left, right) => left.costPerTask - right.costPerTask).map((point) => `${point.x},${point.y}`).join(" ")} key={familyKey(points[0])} />)}
-                </g>
-                <g className="model-market-points">
-                  {plottedModels.map((model) => (
-                    <a href={model.href} target="_blank" rel="noreferrer" aria-label={`查看 ${model.name} 的指标原页`} key={model.id}>
-                      <g
-                        className="model-market-point"
-                        data-model-id={model.id}
-                        data-provider={model.providerName}
-                        role="img"
-                        aria-label={`${model.name}：编程指数 ${model.codingIndex}，通用智能指数 ${model.intelligenceIndex}，单任务成本 ${costLabel(model.costPerTask)}`}
-                      >
-                        <circle className="model-market-hit" cx={model.x} cy={model.y} r="22" />
-                        {model.shape === "diamond"
-                          ? <path d={`M ${model.x} ${model.y - model.radius} L ${model.x + model.radius} ${model.y} L ${model.x} ${model.y + model.radius} L ${model.x - model.radius} ${model.y} Z`} style={{ fill: model.color }} />
-                          : model.shape === "square"
-                            ? <rect x={model.x - model.radius * .82} y={model.y - model.radius * .82} width={model.radius * 1.64} height={model.radius * 1.64} rx="2" style={{ fill: model.color }} />
-                            : <circle cx={model.x} cy={model.y} r={model.radius} style={{ fill: model.color }} />}
-                        {labelPlacements.has(model.id) && (() => {
-                          const label = labelPlacements.get(model.id)!;
-                          return <text x={label.x} y={label.y} textAnchor={label.anchor}>
-                            <tspan className="model-market-name" lang="en">{model.shortName}</tspan>
-                            {label.showMeta && <tspan className="model-market-meta" x={label.x} dy="14">编 {model.codingIndex.toFixed(0)} · 通 {model.intelligenceIndex.toFixed(0)} · {costLabel(model.costPerTask)}</tspan>}
-                          </text>;
-                        })()}
-                      </g>
-                    </a>
-                  ))}
-                </g>
-              </svg>
-              </div>
+              <ModelLandscapeChart
+                models={chartModels}
+                bounds={landscape}
+                codingTicks={codingTicks.map((score) => ({ value: score, label: String(score), position: yForCoding(score) }))}
+                costTicks={costTicks.map((price) => ({ value: price, label: costLabel(price), position: xForCost(price) }))}
+              />
             </>}
             <figcaption>
               数据源：<a href={snapshot.modelLandscape.sourceUrl} target="_blank" rel="noreferrer">{snapshot.modelLandscape.sourceName} ↗</a>，

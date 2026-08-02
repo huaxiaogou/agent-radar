@@ -469,3 +469,29 @@
 - Edge cases found: 8; rotating manifests, multi-manifest selection, schema drift, fail-safe retention, bounded binary transport, color-only encoding, mobile density and old-snapshot compatibility are handled.
 - Questions awaiting review: 1 external-source durability item.
 - Next session should read this section, `radar/model-landscape.mjs`, `radar/database.mjs`, `radar/pipeline.mjs` and `app/models/page.tsx` before changing dynamic model metrics or scheduling.
+
+## Model landscape legibility session
+
+### Deviations
+
+- None. The agreed boundary remains intact: every model keeps its true metric coordinates while only labels move or become interaction-only.
+
+### Discovered edge cases
+
+- The existing label collision check treats prior labels as obstacles but ignores every visible model marker; a legal label box can therefore cover its own marker or a neighboring marker.
+- The current fixed 10 px label offset is smaller than the largest dynamic marker radius, so overlap can happen before density is considered.
+- Ninety-five live points cannot all carry persistent two-line labels in the high-score cluster; complete access must be preserved through focus, hover and the exact data table instead of forcing every label on screen.
+- The existing 1040 px exact-comparison table exposed its min-content width through the mobile page even though its wrapper had `overflow-x: auto`; the model sections and both horizontal scrollers now explicitly shrink to the viewport.
+- Live model names can exceed the estimated label rail. Persistent labels are capped at 32 characters with a real ellipsis; the inspector, native picker, point title and exact table retain the full name.
+
+### Questions for review
+
+- None. This is a reversible presentation-only change; ingestion, model metrics, scheduling and stored snapshots are out of scope.
+
+### Session summary
+
+- Deviations count: 0.
+- Most likely revisit: tune the 18-candidate ceiling if a future benchmark payload changes provider or score density substantially.
+- Edge cases found: 5; marker obstacles, marker radius, impossible all-label density, mobile min-content overflow and long names are handled.
+- Questions awaiting review: 0.
+- Next session should read this section, `app/lib/model-landscape-layout.mjs` and `app/models/ModelLandscapeChart.tsx` before changing chart density or interaction.
