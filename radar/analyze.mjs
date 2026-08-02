@@ -274,6 +274,29 @@ function outputText(response) {
   return "";
 }
 
+function markModelOutputError(error) {
+  const outputError = error instanceof Error ? error : new Error(String(error));
+  outputError.modelOutputInvalid = true;
+  return outputError;
+}
+
+function retryCorrection(error) {
+  if (error?.modelOutputInvalid !== true) return "";
+  const rawIssue = cleanText(error instanceof Error ? error.message : String(error), 360);
+  if (/^中文编辑校验失败[：:]/.test(rawIssue)) {
+    const issue = rawIssue.replace(/^中文编辑校验失败[：:]\s*/, "");
+    return cleanText([
+      `中文编辑校验失败：${issue || "模型输出未通过本地中文编辑门禁"}`,
+      "请重新生成完整 JSON；title/标题必须以中文为主体（中文主导），只保留不可替代的产品名、框架名、缩写和版本号。",
+      "不得照抄英文原标题，也不要回避或放宽上述校验要求。",
+    ].join("\n"), 640);
+  }
+  return cleanText([
+    `模型输出校验失败：${rawIssue || "模型输出不符合结构要求"}`,
+    "请按既定字段与枚举重新生成完整 JSON，不要附加 Markdown 或解释文字。",
+  ].join("\n"), 640);
+}
+
 function validateAnalysis(value, analysisMode, categoricalFallback) {
   if (!value || typeof value !== "object") throw new Error("分析结果不是对象");
   for (const key of ["title", "summary", "implication"]) {
@@ -357,7 +380,7 @@ export function hasOpenAIAnalysis() {
   return resolveAnalysisProvider() === "openai";
 }
 
-async function openAIAttempt(item) {
+async function openAIAttempt(item, correction = "") {
   if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY 未配置");
   const model = process.env.RADAR_OPENAI_MODEL || "gpt-5.6-terra";
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -370,7 +393,7 @@ async function openAIAttempt(item) {
       model,
       store: false,
       reasoning: { effort: "low" },
-      instructions: ANALYSIS_INSTRUCTIONS,
+      instructions: correction ? `${ANALYSIS_INSTRUCTIONS}\n\n${correction}` : ANALYSIS_INSTRUCTIONS,
       input: analysisInput(item),
       text: {
         format: {
@@ -391,17 +414,29 @@ async function openAIAttempt(item) {
   }
   const body = await response.json();
   if (body.status !== "completed") throw new Error(`OpenAI 响应未完成：${body.status || "unknown"}`);
-  return validateAnalysis(JSON.parse(outputText(body)), "openai", ruleAnalysis(item));
+  let parsed;
+  try {
+    parsed = JSON.parse(outputText(body));
+  } catch {
+    throw markModelOutputError(new Error("模型输出不是有效 JSON"));
+  }
+  try {
+    return validateAnalysis(parsed, "openai", ruleAnalysis(item));
+  } catch (error) {
+    throw markModelOutputError(error);
+  }
 }
 
 export async function openAIAnalysis(item) {
   let lastError;
+  let correction = "";
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      return await openAIAttempt(item);
+      return await openAIAttempt(item, correction);
     } catch (error) {
       lastError = error;
       if (error?.retryable === false || attempt === 2) break;
+      correction = retryCorrection(error);
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
   }
@@ -417,7 +452,7 @@ function deepSeekEndpoint() {
   return endpoint.toString();
 }
 
-async function deepSeekAttempt(item) {
+async function deepSeekAttempt(item, correction = "") {
   const model = process.env.RADAR_DEEPSEEK_MODEL || "deepseek-v4-flash";
   const maxTokens = Number(process.env.RADAR_DEEPSEEK_MAX_TOKENS || 1600);
   if (!Number.isInteger(maxTokens) || maxTokens < 256) throw new Error("RADAR_DEEPSEEK_MAX_TOKENS 必须是不小于 256 的整数");
@@ -436,6 +471,7 @@ async function deepSeekAttempt(item) {
           content: `${ANALYSIS_INSTRUCTIONS}\n必须仅输出一个 JSON 对象，不要使用 Markdown。\n${ANALYSIS_ENUM_GUIDANCE}\nJSON 字段和格式示例：\n${JSON.stringify(ANALYSIS_EXAMPLE)}`,
         },
         { role: "user", content: analysisInput(item) },
+        ...(correction ? [{ role: "user", content: correction }] : []),
       ],
       response_format: { type: "json_object" },
       max_tokens: maxTokens,
@@ -452,25 +488,31 @@ async function deepSeekAttempt(item) {
   const choice = body.choices?.[0];
   if (choice?.finish_reason === "length") throw new Error("DeepSeek JSON 输出被截断");
   const content = choice?.message?.content?.trim();
-  if (!content) throw new Error("DeepSeek 返回空内容");
+  if (!content) throw markModelOutputError(new Error("DeepSeek 返回空内容"));
   let parsed;
   try {
     parsed = JSON.parse(content);
-  } catch (error) {
-    throw new Error(`DeepSeek JSON 无效：${error instanceof Error ? error.message : String(error)}`);
+  } catch {
+    throw markModelOutputError(new Error("模型输出不是有效 JSON"));
   }
-  return validateAnalysis(parsed, "deepseek", ruleAnalysis(item));
+  try {
+    return validateAnalysis(parsed, "deepseek", ruleAnalysis(item));
+  } catch (error) {
+    throw markModelOutputError(error);
+  }
 }
 
 export async function deepSeekAnalysis(item) {
   if (!process.env.DEEPSEEK_API_KEY) throw new Error("DEEPSEEK_API_KEY 未配置");
   let lastError;
+  let correction = "";
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      return await deepSeekAttempt(item);
+      return await deepSeekAttempt(item, correction);
     } catch (error) {
       lastError = error;
       if (error?.retryable === false || attempt === 2) break;
+      correction = retryCorrection(error);
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
   }

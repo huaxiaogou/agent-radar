@@ -160,7 +160,7 @@ function groupSignals(rows) {
     const { verificationState, confidence } = verificationFor(sourceMix);
     const representativeSource = sources.find((source) => source.href === representative.url);
     let publicSources = sources.slice(0, 8);
-    if (representativeSource && !publicSources.some((source) => source.href === representative.url)) {
+    if (representativeSource && !publicSources.some((source) => source.href === representativeSource.href)) {
       publicSources = [...publicSources.slice(0, 7), representativeSource];
     }
     return [{
@@ -179,6 +179,7 @@ function groupSignals(rows) {
       sourceMix,
       accent: representative.accent,
       evidence,
+      representativeSource,
       sources: publicSources,
       publishedAt: newestAt,
       discoveredAt: representative.discovered_at,

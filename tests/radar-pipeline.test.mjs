@@ -212,6 +212,18 @@ function openAIResponse(analysis) {
   }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
+function providerRawResponse(provider, content) {
+  if (provider === "openai") {
+    return new Response(JSON.stringify({
+      status: "completed",
+      output: [{ type: "message", content: [{ type: "output_text", text: content }] }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }
+  return new Response(JSON.stringify({
+    choices: [{ finish_reason: "stop", message: { content } }],
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
 test("canonical URLs remove trackers and reject local targets", () => {
   assert.equal(
     canonicalizeUrl("/post?utm_source=test&id=7#section", "https://example.com/blog/"),
@@ -1075,6 +1087,148 @@ for (const provider of ["deepseek", "openai"]) {
       for (const field of ["title", "summary", "implication"]) {
         assert.match(result[field], /[\u3400-\u9fff]/, `${field} 必须是中文编辑结果`);
       }
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDeepSeekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = originalDeepSeekKey;
+      if (originalOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenAIKey;
+    }
+  });
+
+  test(`${provider} retry explains the failed Chinese title gate and requests a Chinese-led rewrite`, async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDeepSeekKey = process.env.DEEPSEEK_API_KEY;
+    const originalOpenAIKey = process.env.OPENAI_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    const requestBodies = [];
+    const analyses = [
+      deepSeekPublishAnalysis("Agent Skills for .NET is now released 正式发布"),
+      deepSeekPublishAnalysis(".NET Agent Skills 正式发布并纳入智能体技能框架"),
+    ];
+    globalThis.fetch = async (_url, init) => {
+      const requestBody = JSON.parse(init.body);
+      requestBodies.push(requestBody);
+      const analysis = analyses[Math.min(requestBodies.length - 1, analyses.length - 1)];
+      if (provider === "openai") return openAIResponse(analysis);
+      return new Response(JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { content: JSON.stringify(analysis) } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    try {
+      const result = await analyzeItem(providerTestItem(), provider);
+      assert.equal(requestBodies.length, 2, "中文标题校验失败后只能追加一次修复请求");
+      assert.equal(result.analysisMode, provider);
+      assert.equal(result.title, ".NET Agent Skills 正式发布并纳入智能体技能框架");
+
+      const firstRequest = JSON.stringify(requestBodies[0]);
+      const retryRequest = JSON.stringify(requestBodies[1]);
+      assert.doesNotMatch(firstRequest, /title 不是中文主导内容|15%/, "首次请求不能伪装成重试或携带不存在的失败原因");
+      assert.match(retryRequest, /中文编辑校验失败/, "重试必须说明失败来自公开中文编辑门禁");
+      assert.match(retryRequest, /title 不是中文主导内容/, "重试必须携带本次真实校验失败原因");
+      assert.match(retryRequest, /15%/, "重试不能丢失失败门槛，避免模型重复给出同类标题");
+      assert.match(
+        retryRequest,
+        /(?:title|标题).{0,30}(?:以中文(?:表达|叙述)?为主体|中文主导)/,
+        "重试必须明确要求标题以中文为主体",
+      );
+      assert.match(
+        retryRequest,
+        /(?:不要|不得|禁止).{0,12}照抄英文(?:原题|原标题)/,
+        "重试必须明确禁止照抄英文原标题",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDeepSeekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = originalDeepSeekKey;
+      if (originalOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenAIKey;
+    }
+  });
+
+  test(`${provider} malformed JSON retry uses a fixed local reason without replaying model output`, async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDeepSeekKey = process.env.DEEPSEEK_API_KEY;
+    const originalOpenAIKey = process.env.OPENAI_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    const requestBodies = [];
+    globalThis.fetch = async (_url, init) => {
+      requestBodies.push(JSON.parse(init.body));
+      const content = requestBodies.length === 1
+        ? '{"private":"PRIVATE_MODEL_OUTPUT"'
+        : JSON.stringify(deepSeekPublishAnalysis("Agent Harness 已生成有效中文分析"));
+      return providerRawResponse(provider, content);
+    };
+
+    try {
+      const result = await analyzeItem(providerTestItem(), provider);
+      assert.equal(requestBodies.length, 2, "无效 JSON 只能触发一次有界重试");
+      assert.equal(result.analysisMode, provider);
+      const retryRequest = JSON.stringify(requestBodies[1]);
+      assert.match(retryRequest, /模型输出不是有效 JSON/, "解析失败只能回传固定、可行动的本地原因");
+      assert.doesNotMatch(retryRequest, /PRIVATE_MODEL_OUTPUT/, "模型原始输出不得回灌进下一次提示词");
+      assert.doesNotMatch(retryRequest, /Unexpected|position\s+\d+|JSON 无效/, "JSON 解析器原始错误片段不得回灌进下一次提示词");
+      assert.doesNotMatch(retryRequest, /中文编辑校验失败/, "JSON 语法错误不能伪装成中文编辑门禁失败");
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDeepSeekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = originalDeepSeekKey;
+      if (originalOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenAIKey;
+    }
+  });
+
+  test(`${provider} HTTP 400 is terminal and never consumes the retry budget`, async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDeepSeekKey = process.env.DEEPSEEK_API_KEY;
+    const originalOpenAIKey = process.env.OPENAI_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    let attempts = 0;
+    globalThis.fetch = async () => {
+      attempts += 1;
+      return new Response("invalid request", { status: 400, headers: { "content-type": "text/plain" } });
+    };
+
+    try {
+      const result = await analyzeItem(providerTestItem(), provider);
+      assert.equal(attempts, 1, "HTTP 400 是不可重试的请求错误，不能发起第二次调用");
+      assert.equal(result.analysisMode, "rules");
+      assert.match(result.analysisError, /HTTP 400/);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDeepSeekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = originalDeepSeekKey;
+      if (originalOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenAIKey;
+    }
+  });
+
+  test(`${provider} HTTP 503 retry preserves the original prompt without model-output correction`, async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDeepSeekKey = process.env.DEEPSEEK_API_KEY;
+    const originalOpenAIKey = process.env.OPENAI_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    const requestBodies = [];
+    globalThis.fetch = async (_url, init) => {
+      requestBodies.push(JSON.parse(init.body));
+      if (requestBodies.length === 1) {
+        return new Response("PRIVATE_HTTP_BODY temporary unavailable", { status: 503, headers: { "content-type": "text/plain" } });
+      }
+      return providerRawResponse(provider, JSON.stringify(deepSeekPublishAnalysis("Agent Harness 已从瞬时故障恢复")));
+    };
+
+    try {
+      const result = await analyzeItem(providerTestItem(), provider);
+      assert.equal(requestBodies.length, 2, "HTTP 503 允许且只允许一次重试");
+      assert.equal(result.analysisMode, provider);
+      assert.deepEqual(requestBodies[1], requestBodies[0], "瞬时上游错误重试必须保持原始 prompt 语义和请求结构");
+      const retryRequest = JSON.stringify(requestBodies[1]);
+      assert.doesNotMatch(retryRequest, /中文编辑校验失败|模型输出不是有效 JSON|PRIVATE_HTTP_BODY/, "HTTP 错误不得注入模型输出纠错提示");
     } finally {
       globalThis.fetch = originalFetch;
       if (originalDeepSeekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
@@ -2072,81 +2226,174 @@ test("snapshot withholds rules-only English display prose until LLM backfill suc
   }
 });
 
-test("historical analysis backfill selects only rules and leaves invalid DeepSeek history for readiness containment", async () => {
+test("historical analysis backfill repairs rules and invalid legacy LLM rows without rerunning ready LLM editing", async () => {
   const previousDataDirectory = process.env.RADAR_DATA_DIR;
-  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-deepseek-history-containment-"));
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-legacy-editorial-repair-"));
   process.env.RADAR_DATA_DIR = isolatedDataDirectory;
   const { insertArticle, openDatabase, upsertSourceCatalog } = await import("../radar/database.mjs");
   const { runAnalysisBackfill } = await import("../radar/backfill.mjs");
-  const { buildSnapshot } = await import("../radar/snapshot.mjs");
+  const { isLlmEditorialReady } = await import("../radar/editorial.mjs");
   const database = openDatabase();
   const source = {
-    id: "invalid-deepseek-history",
-    name: "Historical DeepSeek Source",
-    homepage: "https://deepseek-history.example.com",
+    id: "legacy-editorial-source",
+    name: "Historical Editorial Source",
+    homepage: "https://legacy-editorial.example.com",
     class: "一手工程",
     priority: "P0",
     cadence: "4h",
     focus: "Agent Harness",
-    independentGroup: "invalid-deepseek-history",
+    independentGroup: "legacy-editorial-source",
     layer: "official",
-    language: "ja",
+    language: "en",
   };
-  const originalEditorial = {
-    title: "Claude Code が復旧可能なタスク実行を追加",
-    summary: "公式チームは長時間のタスク向けに復旧機能を追加したと説明しています。",
-    implication: "導入前に権限境界と中断からの復旧を検証する必要があります。",
-  };
-  const url = "https://deepseek-history.example.com/recovery";
+  const invalidSummary = "The historical model output copied the English source instead of producing a Chinese editorial synthesis.";
+  const invalidImplication = "Engineering teams should validate recovery and permission boundaries before production use.";
+  const rows = [
+    {
+      id: "legacy-rules",
+      analysisMode: "rules",
+      title: "Agent Skills for .NET is now released 正式发布",
+      summary: invalidSummary,
+      implication: invalidImplication,
+      shouldBackfill: true,
+    },
+    {
+      id: "legacy-invalid-deepseek",
+      analysisMode: "deepseek",
+      title: "Agent Skills for .NET is now released 正式发布",
+      summary: invalidSummary,
+      implication: invalidImplication,
+      shouldBackfill: true,
+    },
+    {
+      id: "legacy-invalid-openai",
+      analysisMode: "openai",
+      title: "Agent Framework release analysis remains in English 需要重做",
+      summary: invalidSummary,
+      implication: invalidImplication,
+      shouldBackfill: true,
+    },
+    {
+      id: "legacy-ready-deepseek",
+      analysisMode: "deepseek",
+      ...deepSeekPublishAnalysis("历史 DeepSeek 中文分析保持有效"),
+      shouldBackfill: false,
+    },
+    {
+      id: "legacy-ready-openai",
+      analysisMode: "openai",
+      ...deepSeekPublishAnalysis("历史 OpenAI 中文分析保持有效"),
+      shouldBackfill: false,
+    },
+  ].map((row, index) => ({
+    ...row,
+    url: `https://legacy-editorial.example.com/${row.id}`,
+    originalTitle: `Original evidence title ${index + 1}`,
+    originalExcerpt: `Original evidence excerpt ${index + 1}`,
+    contentText: `Original evidence body ${index + 1} with checkpoints, approvals, and tool calls.`,
+    contentHash: `legacy-editorial-content-${index + 1}`,
+  }));
   try {
     upsertSourceCatalog(database, [source]);
-    assert.equal(insertArticle(database, {
-      url,
-      sourceId: source.id,
-      sourceName: source.name,
-      sourceClass: source.class,
-      independentGroup: source.independentGroup,
-      sourceLayer: source.layer,
-      sourceLanguage: source.language,
-      originalTitle: "Claude Code の復旧機能",
-      originalExcerpt: "日本語の公式説明です。",
-      contentText: "チェックポイント、承認、復旧機能の説明です。",
-      publishedAt: "2026-08-02T01:00:00.000Z",
-      discoveredAt: "2026-08-02T01:05:00.000Z",
-      contentHash: "invalid-deepseek-history-v1",
-      relevanceScore: 10,
-      signalSlug: "invalid-deepseek-history",
-      conceptSlug: "agent-harness",
-      ...originalEditorial,
-      topic: "工程",
-      stage: "Emerging",
-      accent: "engineering",
-      tags: ["agent-harness"],
-      analysisMode: "deepseek",
-      publishDecision: "publish",
-    }), true);
+    for (const [index, row] of rows.entries()) {
+      assert.equal(insertArticle(database, {
+        url: row.url,
+        sourceId: source.id,
+        sourceName: source.name,
+        sourceClass: source.class,
+        independentGroup: source.independentGroup,
+        sourceLayer: source.layer,
+        sourceLanguage: source.language,
+        originalTitle: row.originalTitle,
+        originalExcerpt: row.originalExcerpt,
+        contentText: row.contentText,
+        publishedAt: `2026-08-02T0${index + 1}:00:00.000Z`,
+        discoveredAt: `2026-08-02T0${index + 1}:05:00.000Z`,
+        contentHash: row.contentHash,
+        relevanceScore: 10,
+        signalSlug: row.id,
+        conceptSlug: "agent-harness",
+        title: row.title,
+        summary: row.summary,
+        implication: row.implication,
+        topic: "工程",
+        stage: "Emerging",
+        accent: "engineering",
+        tags: ["agent-harness"],
+        analysisMode: row.analysisMode,
+        publishDecision: "publish",
+      }), true);
+    }
 
-    let analysisCalls = 0;
+    const readyRows = rows.filter((row) => !row.shouldBackfill);
+    const readyBefore = new Map(readyRows.map((row) => [
+      row.url,
+      { ...database.prepare("SELECT * FROM articles WHERE url = ?").get(row.url) },
+    ]));
+
+    const analysisCalls = [];
     const result = await runAnalysisBackfill({
       database,
       concurrency: 2,
       logger: { info() {}, warn() {}, error() {} },
-      analyze: async () => {
-        analysisCalls += 1;
-        return { ...deepSeekPublishAnalysis("不应重跑的历史 DeepSeek 记录"), analysisMode: "deepseek" };
+      analyze: async (item) => {
+        analysisCalls.push(item.url);
+        const row = rows.find((candidate) => candidate.url === item.url);
+        assert.ok(row?.shouldBackfill, "回填不得调用已经通过当前中文门禁的旧 LLM 记录");
+        assert.deepEqual({
+          title: item.title,
+          excerpt: item.excerpt,
+          contentText: item.contentText,
+        }, {
+          title: row.originalTitle,
+          excerpt: row.originalExcerpt,
+          contentText: row.contentText,
+        }, "重分析输入必须来自原始证据，不能把旧展示文案当作原文");
+        return {
+          ...deepSeekPublishAnalysis("历史记录已完成中文重新分析"),
+          analysisMode: "deepseek",
+        };
       },
     });
 
-    assert.equal(analysisCalls, 0, "historical backfill 只能重跑 analysis_mode=rules，不能重新解释既有 DeepSeek 记录");
-    assert.equal(result.backlogCount, 0);
-    assert.equal(result.updatedCount, 0);
-    const stored = database.prepare("SELECT title, summary, implication, analysis_mode FROM articles WHERE url = ?").get(url);
-    assert.deepEqual({ ...stored }, {
-      ...originalEditorial,
-      analysis_mode: "deepseek",
-    }, "非中文 DeepSeek 历史记录应保持原状，交由 readiness/人工修复处置");
-    const snapshot = await buildSnapshot(database);
-    assert.equal(snapshot.signals.some((signal) => signal.slug === "invalid-deepseek-history"), false, "不合格 DeepSeek 历史记录仍不得公开");
+    const expectedBackfillUrls = rows.filter((row) => row.shouldBackfill).map((row) => row.url);
+    assert.deepEqual(new Set(analysisCalls), new Set(expectedBackfillUrls), "候选必须包含 rules 与所有未通过当前中文门禁的旧 LLM 行");
+    assert.equal(result.backlogCount, expectedBackfillUrls.length);
+    assert.equal(result.updatedCount, expectedBackfillUrls.length);
+    assert.equal(result.failedCount, 0);
+
+    for (const row of rows.filter((candidate) => candidate.shouldBackfill)) {
+      const stored = database.prepare("SELECT * FROM articles WHERE url = ?").get(row.url);
+      assert.equal(isLlmEditorialReady(stored), true, `${row.id} 回填后必须通过当前中文 LLM 门禁`);
+      assert.deepEqual({
+        originalTitle: stored.original_title,
+        originalExcerpt: stored.original_excerpt,
+        contentText: stored.content_text,
+        contentHash: stored.content_hash,
+      }, {
+        originalTitle: row.originalTitle,
+        originalExcerpt: row.originalExcerpt,
+        contentText: row.contentText,
+        contentHash: row.contentHash,
+      }, `${row.id} 回填只能更新编辑结果，不能覆盖原始证据`);
+    }
+    for (const row of readyRows) {
+      const stored = database.prepare("SELECT * FROM articles WHERE url = ?").get(row.url);
+      assert.deepEqual({ ...stored }, readyBefore.get(row.url), `${row.id} 已合格，必须逐字段保持不变`);
+    }
+
+    let repeatedCalls = 0;
+    const repeated = await runAnalysisBackfill({
+      database,
+      concurrency: 2,
+      logger: { info() {}, warn() {}, error() {} },
+      analyze: async () => {
+        repeatedCalls += 1;
+        return { ...deepSeekPublishAnalysis("幂等复跑不应执行"), analysisMode: "deepseek" };
+      },
+    });
+    assert.equal(repeatedCalls, 0, "全部记录合格后复跑必须保持幂等");
+    assert.equal(repeated.backlogCount, 0);
   } finally {
     database.close();
     if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
@@ -2254,11 +2501,28 @@ test("snapshot representative prefers Chinese LLM editing without weakening sour
     assert.deepEqual(signal.sourceMix, { official: 1, practitioner: 0, community: 1 }, "证据层级仍须独立参与可信度计算");
     assert.equal(signal.verificationState, "cross-verified");
     assert.equal(signal.confidence, "较高");
-    assert.equal(signal.sources[0].layer, "official", "原文证据列表仍应把官方来源置前");
+    assert.deepEqual(signal.representativeSource, {
+      name: sources[1].name,
+      href: "https://community.example.com/runtime-review",
+      layer: "community",
+      originalTitle: "Independent review of Agent Harness recovery",
+      language: "en",
+      publishedAt: "2026-08-02T01:10:00.000Z",
+    }, "代表文章必须以独立字段绑定生成中文标题、摘要和工程解读的原文");
+    assert.equal(signal.sources[0].href, "https://official.example.com/runtime-update", "sources 必须继续按证据权威排序，不能让社区 representative 挤到官方来源前");
+    assert.equal(signal.sources[0].layer, "official");
     assert.deepEqual(new Set(signal.sources.map((source) => source.href)), new Set([
       "https://official.example.com/runtime-update",
       "https://community.example.com/runtime-review",
     ]));
+    assert.ok(
+      signal.sources.some((source) => source.href === "https://official.example.com/runtime-update" && source.layer === "official"),
+      "representative 置顶不能删除或降级官方原文证据",
+    );
+    assert.ok(
+      signal.evidence.some((node) => node.label === sources[0].name),
+      "官方来源仍必须进入证据节点，而不是依赖 sources[0] 表达可信度",
+    );
   } finally {
     database.close();
     if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
@@ -3122,10 +3386,21 @@ test("snapshot source cap always preserves the selected representative article U
     assert.ok(signal);
     assert.equal(signal.title, "被选中的中文代表文章", "fixture 必须确认最旧文章确实被选为展示代表");
     assert.equal(signal.sources.length, 8, "公开来源仍可维持 8 条上限");
-    assert.ok(
-      signal.sources.some((item) => item.href === representativeUrl),
-      "来源裁剪必须保留生成公开标题、摘要和工程含义的 representative 原文",
+    assert.deepEqual(signal.representativeSource, {
+      name: source.name,
+      href: representativeUrl,
+      layer: "official",
+      originalTitle: "Agent Harness source evidence 1",
+      language: "en",
+      publishedAt: "2026-09-01T00:00:00.000Z",
+    }, "来源裁剪之外必须显式保留生成公开文案的 representative 元数据");
+    assert.deepEqual(
+      signal.sources.map((item) => item.href),
+      [9, 8, 7, 6, 5, 4, 3, 1].map((index) => `https://representative-cap.example.com/evidence-${index}`),
+      "sources 应保持证据排序；representative 不在前八时只替换最后一项，不能强行置顶",
     );
+    assert.ok(signal.sources.some((item) => item.href === representativeUrl), "8 条来源上限仍不能丢失 representative 原文");
+    assert.equal(new Set(signal.sources.map((item) => item.href)).size, 8, "代表原文置顶不能产生重复来源或突破上限");
   } finally {
     database.close();
   }

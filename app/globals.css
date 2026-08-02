@@ -195,8 +195,11 @@ main { width: min(100%, 1600px); margin: 0 auto; padding: 0 clamp(22px, 4vw, 64p
 .stage-cooling { color: var(--ink-muted); background: var(--surface-muted); border-color: var(--rule); }
 .signal-card h2 { max-width: 900px; margin: 18px 0 14px; font-size: clamp(1.32rem, 2vw, 2rem); font-weight: 680; letter-spacing: -0.035em; line-height: 1.22; }
 .featured h2 { margin-top: 26px; font-size: clamp(2rem, 4vw, 3.45rem); line-height: 1.08; }
-.signal-summary { max-width: 820px; margin: 0 0 24px; color: var(--ink-muted); }
+.signal-summary { max-width: 820px; margin: 0 0 10px; color: var(--ink-muted); }
 .featured .signal-summary { font-size: 1.05rem; }
+.signal-summary-actions { display: flex; flex-wrap: wrap; gap: 7px 18px; margin: 0 0 24px; }
+.signal-summary-actions a { display: inline-flex; min-height: 44px; align-items: center; padding: 0 7px; color: var(--evidence-dark); font-size: .74rem; font-weight: 680; text-decoration: underline; text-decoration-color: #adbbff; text-underline-offset: 3px; }
+.signal-summary-actions a:hover { color: var(--evidence); text-decoration-color: currentColor; }
 
 .evidence-pulse { position: relative; height: 60px; margin: 27px 0 18px; }
 .evidence-pulse.is-compact { height: 44px; margin: 22px 0 12px; }

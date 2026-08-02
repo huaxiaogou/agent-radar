@@ -29,6 +29,7 @@ export type Signal = {
   confidence: "待溯源" | "中等" | "较高";
   accent: "signal" | "evidence" | "engineering" | "conflict";
   evidence: EvidenceNode[];
+  representativeSource?: SignalSource;
   sources: SignalSource[];
   sourceMix?: Record<SourceLayer, number>;
   verificationState?: "community-only" | "official-only" | "cross-verified" | "independently-observed" | "practitioner-only";

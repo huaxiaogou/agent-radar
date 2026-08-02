@@ -3,6 +3,8 @@ import type { Signal } from "../lib/radar-data";
 import { EvidencePulse } from "./EvidencePulse";
 
 export function SignalCard({ signal, featured = false }: { signal: Signal; featured?: boolean }) {
+  const analysisHref = `/concepts/${signal.conceptSlug ?? signal.slug}`;
+  const primarySource = signal.representativeSource ?? signal.sources[0];
   const verificationCopy = signal.verificationState === "cross-verified"
     ? "官方 + 独立来源交叉验证"
     : signal.verificationState === "community-only"
@@ -22,6 +24,14 @@ export function SignalCard({ signal, featured = false }: { signal: Signal; featu
       </div>
       <h2>{signal.title}</h2>
       <p className="signal-summary">{signal.summary}</p>
+      <nav className="signal-summary-actions" aria-label={`${signal.title} 摘要操作`}>
+        <Link href={analysisHref}>查看完整分析 <span aria-hidden="true">→</span></Link>
+        {primarySource && (
+          <a href={primarySource.href} target="_blank" rel="noopener noreferrer">
+            阅读原文 <span aria-hidden="true">↗</span>
+          </a>
+        )}
+      </nav>
       <EvidencePulse nodes={signal.evidence} compact={!featured} />
       <div className="evidence-metrics" aria-label="证据概况">
         <span><b>{signal.evidenceCount}</b> 证据节点</span>
@@ -41,7 +51,6 @@ export function SignalCard({ signal, featured = false }: { signal: Signal; featu
             </a>
           ))}
         </div>
-        <Link href={`/concepts/${signal.conceptSlug ?? signal.slug}`} className="detail-link">打开分析 <span aria-hidden="true">→</span></Link>
       </footer>
     </article>
   );

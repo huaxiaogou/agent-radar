@@ -125,7 +125,7 @@ async function createProductionSnapshotFixture() {
       signalSlug,
       conceptSlug: conceptFixture.conceptSlug,
       title: "Agent Harness：把审批与恢复放进运行时",
-      summary: "官方实现把审批、检查点和遥测纳入 Agent 运行时。",
+      summary: "官方实现把审批、检查点和遥测纳入 Agent 运行时…",
       implication: "验证审批边界、恢复语义和运行证据，而不只看一次回答。",
       topic: "工程",
       stage: "Validated",
@@ -314,8 +314,18 @@ async function createProductionSnapshotFixture() {
     const snapshot = await buildSnapshot(database);
     const oldSnapshotSignal = snapshot.signals.find((item) => item.slug === secondSignalSlug);
     assert.ok(oldSnapshotSignal);
+    const representativeSource = oldSnapshotSignal.sources.find((item) => item.href === conceptFixture.secondSourceUrl);
+    assert.ok(representativeSource, "fixture 必须找到生成遥测信号文案的代表原文");
+    oldSnapshotSignal.representativeSource = { ...representativeSource };
     delete oldSnapshotSignal.conceptSlug;
-    oldSnapshotSignal.sources.push({ name: "旧快照重复引用", href: conceptFixture.sourceUrl });
+    oldSnapshotSignal.sources.unshift({
+      name: "证据排序优先来源",
+      href: conceptFixture.sourceUrl,
+      layer: "official",
+      language: "en",
+      originalTitle: "Agent Harness adds durable approvals",
+      publishedAt: "2026-08-01T07:00:00.000Z",
+    });
     oldSnapshotSignal.sources.push({ name: "单条信号内重复引用", href: conceptFixture.secondSourceUrl });
     await writeSnapshotAtomic(snapshot);
   } finally {
@@ -414,6 +424,85 @@ test("primary routes render with a heading and skip link", async () => {
     assert.match(html, /<h1[ >]/i, route);
     assert.match(html, /跳到主要内容/, route);
   }
+});
+
+test("signal summaries expose an adjacent accessible analysis or original-source action", async () => {
+  const response = await render("/signals");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  const $ = load(html);
+  const cards = $(".signal-card");
+  assert.ok(cards.length >= 1, "信号页 fixture 必须渲染至少一张真实 SignalCard");
+
+  let originalSourceActionCount = 0;
+  cards.each((_index, cardNode) => {
+    const card = $(cardNode);
+    const summary = card.find(".signal-summary").first();
+    assert.equal(summary.length, 1, "每张信号卡必须有唯一摘要");
+    const actions = summary.next();
+    assert.equal(
+      actions.hasClass("signal-summary-actions"),
+      true,
+      `摘要后必须紧邻明确操作，不能先经过证据图或其他内容：${card.find("h2").text().trim()}`,
+    );
+
+    const links = actions.find("a[href]");
+    const internalAnalysisLinks = links.filter((_linkIndex, link) => (
+      $(link).text().replace(/\s+/g, " ").trim().startsWith("查看完整分析")
+    ));
+    const originalSourceLinks = links.filter((_linkIndex, link) => (
+      $(link).text().replace(/\s+/g, " ").trim().startsWith("阅读原文")
+    ));
+    assert.ok(
+      internalAnalysisLinks.length + originalSourceLinks.length >= 1,
+      "邻近操作必须明确命名为“查看完整分析”或“阅读原文”",
+    );
+
+    internalAnalysisLinks.each((_linkIndex, link) => {
+      const href = $(link).attr("href") || "";
+      assert.match(href, /^\/concepts\/[^/?#]+$/, "站内完整分析必须使用真实 concept 路由");
+      assert.notEqual($(link).attr("target"), "_blank", "站内分析不得无故打开新窗口");
+    });
+
+    const cardSourceHrefs = new Set(
+      card.find(".source-links a[href]").toArray().map((link) => $(link).attr("href")),
+    );
+    originalSourceLinks.each((_linkIndex, link) => {
+      originalSourceActionCount += 1;
+      const href = $(link).attr("href") || "";
+      assert.ok(cardSourceHrefs.has(href), "“阅读原文”必须复用该信号真实来源 href，不能生成占位链接");
+      assert.equal($(link).attr("target"), "_blank", "外部原文应明确在新窗口打开");
+      assert.match($(link).attr("rel") || "", /\b(?:noopener|noreferrer)\b/, "新窗口原文链接必须提供安全 rel");
+    });
+  });
+
+  assert.ok(originalSourceActionCount >= 1, "信号页至少应提供一个邻近的真实原文入口");
+  const truncatedCard = cards.filter((_index, card) => $(card).text().includes("把审批与恢复放进运行时")).first();
+  assert.match(truncatedCard.find(".signal-summary").text().trim(), /(?:…|\.\.\.)$/, "fixture 必须覆盖被截断摘要场景");
+  assert.equal(truncatedCard.find(".signal-summary").next().hasClass("signal-summary-actions"), true, "被截断摘要尤其不能成为死路");
+  const telemetryCard = cards.filter((_index, card) => $(card).text().includes("遥测让工具循环可审计")).first();
+  assert.equal(
+    telemetryCard.find(".signal-summary-actions a").filter((_index, link) => $(link).text().includes("阅读原文")).attr("href"),
+    conceptFixture.secondSourceUrl,
+    "邻近“阅读原文”必须使用 representativeSource.href，不能误用证据排序第一项 sources[0]",
+  );
+});
+
+test("signal cards keep exactly one internal concept analysis entry", async () => {
+  const response = await render("/signals");
+  assert.equal(response.status, 200);
+  const $ = load(await response.text());
+  const cards = $(".signal-card");
+  assert.ok(cards.length >= 1);
+
+  cards.each((_index, cardNode) => {
+    const card = $(cardNode);
+    const summaryAnalysisLink = card.find(".signal-summary-actions a[href^='/concepts/']");
+    assert.equal(summaryAnalysisLink.length, 1, "摘要邻近区必须保留唯一“查看完整分析”入口");
+    const href = summaryAnalysisLink.attr("href");
+    assert.equal(card.find(`a[href='${href}']`).length, 1, "每张卡同一 concept 路由只能出现一次");
+    assert.equal(card.find("footer a.detail-link").length, 0, "页脚不得再重复渲染“打开分析”");
+  });
 });
 
 test("model atlas compares coding, everyday capability and price with evidence instead of one leaderboard", async () => {

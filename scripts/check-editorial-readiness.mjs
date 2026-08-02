@@ -60,7 +60,7 @@ try {
       snapshotBacklog: snapshotBacklog.slice(0, 20),
       remediation: "npm run editorial:backfill",
     }, null, 2));
-    console.error("正式数据尚未就绪：请先完成真实采集和 rules 历史回填，再生成完整 live snapshot。");
+    console.error("正式数据尚未就绪：请先完成真实采集和历史中文编辑回填，再生成完整 live snapshot。");
     process.exitCode = 1;
   } else {
     console.log(JSON.stringify({

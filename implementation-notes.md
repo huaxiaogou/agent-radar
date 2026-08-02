@@ -348,3 +348,29 @@
 - Edge cases found: 13; historical terminal URL deduplication, provider-status ambiguity, evidence/editorial priority, provider failure, resumable CAS updates, snapshot writer races, stale-lock ABA, PID reuse, non-Latin language bypass, partial-migration publication, unavailable snapshot fallback, pre-analysis publication caps and representative-link truncation are handled.
 - Questions awaiting review: 0.
 - Next session should read this section, `radar/editorial.mjs`, `radar/backfill.mjs` and `scripts/backfill-analysis.mjs` before changing publication readiness or historical migration.
+
+## Editorial retry and legacy LLM repair session
+
+### Deviations
+
+- The earlier migration deliberately selected only `analysis_mode=rules`. Production evidence showed that some legacy DeepSeek/OpenAI rows also predated the current Chinese editorial gate, while readiness already treated them as backlog. The corrected migration now selects every public row that fails `isLlmEditorialReady`, regardless of its historical provider, and still leaves already-valid LLM rows byte-for-byte unchanged.
+- Signal source order expresses evidence authority and only guarantees that the editorial representative appears somewhere in the first eight links. The adjacent “阅读原文” action requires an exact provenance target without moving a community representative ahead of official evidence, so snapshots now expose a separate `representativeSource`; `sources` retains its authority ordering, URL deduplication and eight-link cap.
+
+### Discovered edge cases
+
+- Retrying the same provider request after a deterministic Chinese validation failure repeats the same invalid title. The single retry now receives only the bounded local validation reason plus explicit Chinese-led title guidance; raw model output, credentials and source content are not echoed into the correction.
+- A legacy LLM provider label does not prove that its stored prose satisfies today's editorial contract. Eligibility is therefore based on the current readiness predicate, not on `analysis_mode` alone.
+- A displayed summary may already end in `…` or `...` because truncation happened before rendering; the browser has no hidden longer string to expand. Signal cards now put explicit “查看完整分析” and representative “阅读原文” actions immediately after the summary instead of presenting a fake disclosure.
+- In a multi-source event cluster, the highest-quality editorial representative may differ from the newest or highest-authority source. Using the first evidence-sorted URL for “阅读原文” can therefore open a different article from the one that produced the displayed synthesis.
+
+### Questions for review
+
+- None. The current contract intentionally reprocesses only invalid historical LLM rows; prompt/model-version migrations for already-valid rows remain a separate future decision.
+
+### Session summary
+
+- Deviations count: 2.
+- Most likely revisit: make `representativeSource` required after every supported deployment has regenerated a post-migration live snapshot; it remains optional only for old snapshot compatibility.
+- Edge cases found: 4; deterministic retry feedback, invalid legacy LLM rows, irreversible summary truncation and representative/source mismatch are covered.
+- Questions awaiting review: 0.
+- Next session should read this section, `radar/analyze.mjs`, `radar/backfill.mjs`, `radar/snapshot.mjs` and `app/components/SignalCard.tsx` before changing editorial retry, migration or source-link behavior.

@@ -63,7 +63,7 @@ export async function runAnalysisBackfill({
 
   activeDatabases.add(database);
   try {
-    const candidates = getPublishedArticlesForBackfill(database).filter((row) => row.analysis_mode === "rules");
+    const candidates = getPublishedArticlesForBackfill(database).filter((row) => !isLlmEditorialReady(row));
     const results = await mapLimit(candidates, workerCount, async (row) => {
       try {
         const analysis = await analyzeItem(analysisInputFromRow(row));
