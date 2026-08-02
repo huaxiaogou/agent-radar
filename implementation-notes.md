@@ -287,3 +287,29 @@
 - Edge cases found: 2; shared top-band labels and mobile chart width are handled.
 - Questions awaiting review: 0.
 - Next session should read this section and `app/models/page.tsx` before changing chart axes or introducing a derived score.
+## Ingestion IPv6 resilience and provider status session
+
+### Deviations
+
+- The first implementation hard-locked IPv4 whenever an A record existed. Reviewer evidence showed that this removed fallback to a second A or AAAA, so the final policy uses asynchronous pinned lookup plus Undici multi-address selection whenever DNS returned more than one verified address; only a single verified address is family-locked.
+- Legacy snapshots have no authoritative provider or per-run analysis record. Their `configuredProvider` is resolved from the current server environment through the same lightweight resolver used by ingestion, while `runAnalysisMode` is conservatively normalized to `none`; historical article analysis never stands in for either runtime fact.
+
+### Discovered edge cases
+
+- A host may resolve to both public IPv6 and IPv4 addresses while the deployment host has no IPv6 route. The validated-address pinning layer must not let an IPv6 connection failure escape the per-source promise boundary.
+- A synchronous custom lookup callback on Node 22 can reject the fetch promise and still allow a later socket error to escape. Deferring the pinned callback to a microtask keeps an unreachable single IPv6 address inside the normal rejected-promise path.
+- More than one verified address is a fallback set even when every address has the same family. The transport policy keeps multi-address selection for multiple A records as well as mixed A/AAAA records.
+- A completed run can discover only already-known or filtered items. In that case there is no per-article analysis mode, which must not be reported as evidence that the configured provider is `rules`.
+- SQLite may contain the new nullable provider column with NULL values if an earlier migration was interrupted. Startup now performs idempotent transactional repair whether the column is newly added or already present.
+
+### Questions for review
+
+- None. Source registry contents, ranking thresholds, credentials and scheduler cadence remain unchanged.
+
+### Session summary
+
+- Deviations count: 2.
+- Most likely revisit: remove the legacy snapshot normalization after every supported deployment has produced a snapshot containing both new status fields.
+- Edge cases found: 5; IPv6-only failure, async socket containment, multi-address fallback, zero-analysis runs and interrupted SQLite migration are covered.
+- Questions awaiting review: 0.
+- Next session should read this section, `radar/fetch.mjs`, `radar/database.mjs` and the new ingestion/status tests before changing transport or status semantics.

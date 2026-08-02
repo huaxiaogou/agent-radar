@@ -9,6 +9,28 @@ function ensureColumn(database, table, column, definition) {
   const columns = database.prepare(`PRAGMA table_info(${table})`).all();
   if (!columns.some((value) => value.name === column)) {
     database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    return true;
+  }
+  return false;
+}
+
+function migrateRunConfiguredProvider(database) {
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    ensureColumn(database, "runs", "configured_provider", "TEXT");
+    database.exec(`
+      UPDATE runs
+      SET configured_provider = CASE
+        WHEN analysis_mode IN ('openai', 'deepseek', 'rules') THEN analysis_mode
+        ELSE 'rules'
+      END
+      WHERE configured_provider IS NULL
+         OR configured_provider NOT IN ('openai', 'deepseek', 'rules')
+    `);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
   }
 }
 
@@ -40,6 +62,7 @@ export function openDatabase() {
       skipped_count INTEGER NOT NULL DEFAULT 0,
       error_count INTEGER NOT NULL DEFAULT 0,
       analysis_mode TEXT NOT NULL DEFAULT 'rules',
+      configured_provider TEXT NOT NULL DEFAULT 'rules',
       message TEXT
     );
 
@@ -115,6 +138,7 @@ export function openDatabase() {
   ensureColumn(database, "articles", "evidence_score", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(database, "articles", "event_key", "TEXT");
   ensureColumn(database, "articles", "candidate_concept", "TEXT NOT NULL DEFAULT ''");
+  migrateRunConfiguredProvider(database);
   database.exec("CREATE INDEX IF NOT EXISTS articles_event_idx ON articles(concept_slug, event_key)");
   return database;
 }
@@ -161,11 +185,11 @@ export function upsertSourceCatalog(database, sources) {
   }
 }
 
-export function beginRun(database, trigger, startedAt, analysisMode) {
+export function beginRun(database, trigger, startedAt, configuredProvider) {
   const result = database.prepare(`
-    INSERT INTO runs (trigger, started_at, status, analysis_mode)
-    VALUES (?, ?, 'running', ?)
-  `).run(trigger, startedAt, analysisMode);
+    INSERT INTO runs (trigger, started_at, status, analysis_mode, configured_provider)
+    VALUES (?, ?, 'running', 'none', ?)
+  `).run(trigger, startedAt, configuredProvider);
   return Number(result.lastInsertRowid);
 }
 
@@ -173,7 +197,8 @@ export function finishRun(database, runId, result) {
   database.prepare(`
     UPDATE runs SET
       finished_at = ?, status = ?, fetched_count = ?, accepted_count = ?,
-      skipped_count = ?, error_count = ?, analysis_mode = ?, message = ?
+      skipped_count = ?, error_count = ?, analysis_mode = ?,
+      configured_provider = COALESCE(?, configured_provider), message = ?
     WHERE id = ?
   `).run(
     result.finishedAt,
@@ -182,7 +207,8 @@ export function finishRun(database, runId, result) {
     result.acceptedCount,
     result.skippedCount,
     result.errorCount,
-    result.analysisMode,
+    result.runAnalysisMode || result.analysisMode || "none",
+    result.configuredProvider || null,
     result.message || null,
     runId,
   );

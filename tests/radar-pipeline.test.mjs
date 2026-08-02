@@ -232,6 +232,73 @@ test("public fetch pins the validated DNS answer into the actual connection", as
   assert.equal(dispatcherCalls, 1);
 });
 
+test("public fetch gives a mixed validated DNS set to transport in IPv4-first order", async () => {
+  const { fetchPublicText } = await import("../radar/fetch.mjs");
+  const dnsAnswers = [
+    { address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 },
+    { address: "93.184.216.34", family: 4 },
+  ];
+  const expectedTransportAnswers = [dnsAnswers[1], dnsAnswers[0]];
+  const pinnedDispatcher = { close: async () => {} };
+  let transportAnswers = null;
+  let resolverCalls = 0;
+
+  const result = await fetchPublicText("https://dual-stack.example/article", {
+    fetchImpl: async (_input, init) => {
+      assert.equal(init?.dispatcher, pinnedDispatcher);
+      return new Response("dual-stack body", { status: 200, headers: { "content-type": "text/plain" } });
+    },
+    resolveHostname: async () => {
+      resolverCalls += 1;
+      return dnsAnswers;
+    },
+    createDispatcher: ({ hostname, addresses }) => {
+      assert.equal(hostname, "dual-stack.example");
+      transportAnswers = addresses;
+      return pinnedDispatcher;
+    },
+  });
+
+  assert.equal(result.body, "dual-stack body");
+  assert.equal(resolverCalls, 1, "IPv4 优先不能通过二次 DNS 解析实现");
+  assert.deepEqual(
+    transportAnswers,
+    expectedTransportAnswers,
+    "transport 必须先尝试已验证 IPv4，再保留已验证 IPv6 作为后备；不得添加 DNS 未返回的地址",
+  );
+});
+
+test("transport family policy preserves fallback for every multi-address verified DNS set", async () => {
+  const { transportFamilyPolicy } = await import("../radar/fetch.mjs");
+  assert.equal(typeof transportFamilyPolicy, "function", "默认 transport 策略必须可独立验证");
+
+  for (const addresses of [
+    [
+      { address: "93.184.216.34", family: 4 },
+      { address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 },
+    ],
+    [
+      { address: "93.184.216.34", family: 4 },
+      { address: "93.184.216.35", family: 4 },
+    ],
+  ]) {
+    const policy = transportFamilyPolicy(addresses);
+    assert.equal(policy.autoSelectFamily, true, "两个及以上已验证地址必须保留 transport fallback");
+    assert.equal(policy.family, undefined, "多地址策略不得 hard-lock 到 family=4 或 family=6");
+  }
+
+  assert.deepEqual(
+    transportFamilyPolicy([{ address: "93.184.216.34", family: 4 }]),
+    { autoSelectFamily: false, family: 4 },
+    "恰好一个 IPv4 地址时才允许稳定锁定 IPv4",
+  );
+  assert.deepEqual(
+    transportFamilyPolicy([{ address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 }]),
+    { autoSelectFamily: false, family: 6 },
+    "恰好一个 IPv6 地址时才允许稳定锁定 IPv6",
+  );
+});
+
 test("custom fetch cannot fabricate a public DNS answer when no resolver is supplied", async () => {
   const { fetchPublicText } = await import("../radar/fetch.mjs");
   let fetchCalls = 0;
@@ -458,6 +525,82 @@ test("runIngestion enriches every due feed source while the default AI and publi
     else process.env.RADAR_DATA_DIR = previousDataDirectory;
     await rm(isolatedDataDirectory, { recursive: true, force: true });
   }
+});
+
+test("zero-selection ingestion preserves configured provider and reports no actual article analysis", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-zero-analysis-mode-"));
+  const originalFetch = globalThis.fetch;
+  const restoreEnvironment = configurePipelineTestEnvironment(isolatedDataDirectory);
+  const emptyFeed = "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>Empty Radar Feed</title></channel></rss>";
+  let deepSeekCalls = 0;
+  const sourceFetchImpl = async (input) => {
+    const url = String(input);
+    if (url.includes("hn.algolia.com")) {
+      return new Response(JSON.stringify({ hits: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.includes("bsky.app") || url.includes("bluesky")) {
+      return new Response(JSON.stringify({ posts: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response(emptyFeed, { status: 200, headers: { "content-type": "application/rss+xml" } });
+  };
+  globalThis.fetch = async (input) => {
+    deepSeekCalls += 1;
+    throw new Error(`0 入选时不应调用 DeepSeek：${String(input)}`);
+  };
+
+  try {
+    const { runIngestion } = await import("../radar/pipeline.mjs");
+    const { getSnapshotPath } = await import("../radar/database.mjs");
+    const result = await runIngestion({
+      trigger: "systemd",
+      logger: { info() {}, warn() {}, error() {} },
+      fetchOptions: trustedFetchOptions(sourceFetchImpl),
+    });
+    const snapshot = JSON.parse(await readFile(getSnapshotPath(), "utf8"));
+
+    assert.equal(result.status, "success", "所有到期来源返回合法空结果时，本轮应成功完成而不是伪造失败");
+    assert.equal(result.fetchedCount, 0);
+    assert.equal(result.acceptedCount, 0);
+    assert.equal(deepSeekCalls, 0, "没有候选文章时不得产生 AI 调用");
+    assert.equal(result.configuredProvider, "deepseek", "运行结果必须保留当前进程已解析的 provider");
+    assert.equal(result.runAnalysisMode, "none", "0 篇文章实际经过分析时，本轮分析口径必须是 none");
+    assert.equal(result.snapshot.configuredProvider, "deepseek", "返回的 snapshot status 必须保留 configured provider");
+    assert.equal(result.snapshot.runAnalysisMode, "none", "返回的 snapshot status 必须保留本轮实际分析口径");
+    assert.equal(snapshot.status.configuredProvider, "deepseek", "落盘 status 必须保留 configured provider");
+    assert.equal(snapshot.status.runAnalysisMode, "none", "落盘 status 不得把 0 入选误报为 rules 分析");
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnvironment();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("analysis status label distinguishes configured provider from this run's analysis mode", async () => {
+  const { analysisStatusLabel } = await import("../app/lib/radar-data.ts");
+  assert.equal(typeof analysisStatusLabel, "function", "分析状态文案必须由可独立验证的纯函数生成");
+
+  const configuredWithoutNewAnalysis = analysisStatusLabel({
+    configuredProvider: "deepseek",
+    runAnalysisMode: "none",
+    analysisMode: "rules",
+  });
+  assert.equal(configuredWithoutNewAnalysis, "DeepSeek 已配置 · 本轮无新分析");
+  assert.doesNotMatch(configuredWithoutNewAnalysis, /DeepSeek 分析/, "0 selection 不能声称本轮使用了 DeepSeek 分析");
+
+  assert.equal(analysisStatusLabel({
+    configuredProvider: "deepseek",
+    runAnalysisMode: "deepseek",
+    analysisMode: "deepseek",
+  }), "DeepSeek 分析");
+
+  assert.equal(analysisStatusLabel({
+    configuredProvider: "deepseek",
+    runAnalysisMode: "rules",
+    analysisMode: "rules",
+  }), "规则分析 · DeepSeek 已配置");
 });
 
 test("source classes map Chinese and English evidence to the same three layers", async () => {
@@ -1503,6 +1646,61 @@ test("snapshot source health only includes the current enabled catalog after cat
     );
   } finally {
     database.close();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("openDatabase repairs NULL configured_provider left by an interrupted migration", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-interrupted-provider-migration-"));
+  process.env.RADAR_DATA_DIR = isolatedDataDirectory;
+  const { DatabaseSync } = await import("node:sqlite");
+  const databasePath = path.join(isolatedDataDirectory, "agent-radar.sqlite");
+  const interruptedDatabase = new DatabaseSync(databasePath);
+  try {
+    interruptedDatabase.exec(`
+      CREATE TABLE runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trigger TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        status TEXT NOT NULL,
+        fetched_count INTEGER NOT NULL DEFAULT 0,
+        accepted_count INTEGER NOT NULL DEFAULT 0,
+        skipped_count INTEGER NOT NULL DEFAULT 0,
+        error_count INTEGER NOT NULL DEFAULT 0,
+        analysis_mode TEXT NOT NULL DEFAULT 'rules',
+        configured_provider TEXT,
+        message TEXT
+      );
+      INSERT INTO runs (
+        trigger, started_at, finished_at, status, analysis_mode, configured_provider
+      ) VALUES (
+        'systemd', '2026-08-01T00:00:00.000Z', '2026-08-01T00:01:00.000Z', 'success', 'deepseek', NULL
+      );
+    `);
+  } finally {
+    interruptedDatabase.close();
+  }
+
+  try {
+    const { openDatabase } = await import("../radar/database.mjs");
+    const repairedDatabase = openDatabase();
+    try {
+      const row = repairedDatabase.prepare("SELECT analysis_mode, configured_provider FROM runs WHERE id = 1").get();
+      assert.equal(row.analysis_mode, "deepseek");
+      assert.equal(row.configured_provider, "deepseek", "列已存在但值为 NULL 时也必须完成幂等回填");
+      assert.equal(
+        repairedDatabase.prepare("SELECT COUNT(*) AS count FROM runs WHERE configured_provider IS NULL").get().count,
+        0,
+        "openDatabase 返回前不得遗留 nullable configured_provider",
+      );
+    } finally {
+      repairedDatabase.close();
+    }
+  } finally {
     if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
     else process.env.RADAR_DATA_DIR = previousDataDirectory;
     await rm(isolatedDataDirectory, { recursive: true, force: true });

@@ -359,6 +359,8 @@ export async function buildSnapshot(database) {
     ? "mixed"
     : analysisModes.values().next().value || "rules";
   const lastSuccessfulAt = successfulRun?.finished_at || null;
+  const configuredProvider = latestRun?.configured_provider || "rules";
+  const runAnalysisMode = latestRun?.analysis_mode || "none";
   const publicSignals = signals.map((signal) => {
     const publicSignal = { ...signal };
     delete publicSignal.relevanceScore;
@@ -373,6 +375,8 @@ export async function buildSnapshot(database) {
       lastSuccessfulAt,
       runStatus: latestRun?.status || "never",
       analysisMode,
+      configuredProvider,
+      runAnalysisMode,
       sourceCount: sources.length,
       healthySourceCount: sources.filter((source) => source.status === "正常").length,
       signalCount: signals.length,

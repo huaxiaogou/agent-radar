@@ -147,7 +147,11 @@ async function resolvePublicTarget(input, resolveHostname) {
   if (!normalizedAddresses.length || normalizedAddresses.some((entry) => !entry.family || isBlockedAddress(entry.address))) {
     throw new Error(`抓取目标解析到非公网地址：${url.hostname}`);
   }
-  return { normalized, hostname: url.hostname, addresses: normalizedAddresses };
+  const orderedAddresses = [
+    ...normalizedAddresses.filter((entry) => entry.family === 4),
+    ...normalizedAddresses.filter((entry) => entry.family === 6),
+  ];
+  return { normalized, hostname: url.hostname, addresses: orderedAddresses };
 }
 
 export async function validatePublicTarget(input, { resolveHostname = defaultResolveHostname } = {}) {
@@ -158,21 +162,35 @@ function pinnedLookup(addresses) {
   return (_hostname, options, callback) => {
     const settings = typeof options === "object" && options ? options : {};
     const done = typeof options === "function" ? options : callback;
+    const respond = (...args) => queueMicrotask(() => done(...args));
     const requestedFamily = typeof options === "number" ? options : Number(settings.family || 0);
     const eligible = requestedFamily ? addresses.filter((entry) => entry.family === requestedFamily) : addresses;
     if (!eligible.length) {
       const error = new Error("已校验的 DNS 结果不包含请求的地址族");
       error.code = "EAI_NONAME";
-      done(error);
+      respond(error);
       return;
     }
-    if (settings.all) done(null, eligible.map((entry) => ({ ...entry })));
-    else done(null, eligible[0].address, eligible[0].family);
+    if (settings.all) respond(null, eligible.map((entry) => ({ ...entry })));
+    else respond(null, eligible[0].address, eligible[0].family);
   };
 }
 
+export function transportFamilyPolicy(addresses) {
+  if (addresses.length >= 2) return { autoSelectFamily: true, family: undefined };
+  return { autoSelectFamily: false, family: addresses[0]?.family };
+}
+
 function defaultCreateDispatcher({ addresses }) {
-  return new Agent({ connect: { lookup: pinnedLookup(addresses) } });
+  const familyPolicy = transportFamilyPolicy(addresses);
+  return new Agent({
+    autoSelectFamily: familyPolicy.autoSelectFamily,
+    connect: {
+      lookup: pinnedLookup(addresses),
+      family: familyPolicy.family,
+      autoSelectFamily: familyPolicy.autoSelectFamily,
+    },
+  });
 }
 
 async function cancelResponseBody(response) {

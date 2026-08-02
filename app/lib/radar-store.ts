@@ -2,6 +2,7 @@ import "server-only";
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { resolveAnalysisProvider } from "../../radar/provider.mjs";
 import { seedRadarSnapshot, type RadarSnapshot } from "./radar-data";
 
 function snapshotPath() {
@@ -24,6 +25,19 @@ function isSnapshot(value: unknown): value is RadarSnapshot {
     typeof snapshot.status?.generatedAt === "string";
 }
 
+function normalizedConfiguredProvider(status: RadarSnapshot["status"]): NonNullable<RadarSnapshot["status"]["configuredProvider"]> {
+  if (["openai", "deepseek", "rules"].includes(status.configuredProvider || "")) {
+    return status.configuredProvider as NonNullable<RadarSnapshot["status"]["configuredProvider"]>;
+  }
+  return resolveAnalysisProvider();
+}
+
+function normalizedRunAnalysisMode(status: RadarSnapshot["status"]): NonNullable<RadarSnapshot["status"]["runAnalysisMode"]> {
+  return ["none", "openai", "deepseek", "rules", "mixed"].includes(status.runAnalysisMode || "")
+    ? status.runAnalysisMode as NonNullable<RadarSnapshot["status"]["runAnalysisMode"]>
+    : "none";
+}
+
 export async function getRadarSnapshot(): Promise<RadarSnapshot> {
   try {
     const parsed: unknown = JSON.parse(await readFile(snapshotPath(), "utf8"));
@@ -33,6 +47,8 @@ export async function getRadarSnapshot(): Promise<RadarSnapshot> {
       ...parsed,
       status: {
         ...parsed.status,
+        configuredProvider: normalizedConfiguredProvider(parsed.status),
+        runAnalysisMode: normalizedRunAnalysisMode(parsed.status),
         stale: !lastSuccessfulAt || Date.now() - lastSuccessfulAt > 12 * 60 * 60 * 1000,
       },
       concepts: parsed.concepts?.length ? parsed.concepts : seedRadarSnapshot.concepts,

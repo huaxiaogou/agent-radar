@@ -126,7 +126,6 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
   const analysisProvider = resolveAnalysisProvider();
   const database = openDatabase();
   const startedAt = new Date().toISOString();
-  const preferredAnalysisMode = analysisProvider;
   upsertSourceCatalog(database, sources);
   const sourceHealth = new Map(getSourceHealth(database).map((source) => [source.source_id, source]));
   const dueSources = sources.filter((source) => isSourceDue(source, {
@@ -135,7 +134,7 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
     now: startedAt,
   }));
   const cadenceSkippedSources = sources.length - dueSources.length;
-  const runId = beginRun(database, trigger, startedAt, preferredAnalysisMode);
+  const runId = beginRun(database, trigger, startedAt, analysisProvider);
   let runFinished = false;
   let persistedResult = null;
 
@@ -262,7 +261,6 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
     const since = new Date(Date.now() - 21 * 86_400_000).toISOString();
     const clusterCandidates = getRecentClusterCandidates(database, since).map((row) => ({ ...row }));
     const acceptedBySource = new Map();
-    const acceptedAnalysisModes = new Set();
     let acceptedCount = 0;
     let watchedCount = 0;
     for (const { item, analysis, relevanceScore } of [...publishable, ...watchedConceptCandidates]) {
@@ -278,7 +276,6 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
         continue;
       }
       acceptedCount += 1;
-      acceptedAnalysisModes.add(analysis.analysisMode);
       acceptedBySource.set(item.sourceId, (acceptedBySource.get(item.sourceId) || 0) + 1);
       clusterCandidates.push({
         signal_slug: signalSlug,
@@ -303,9 +300,10 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
     let status = dueSources.length > 0 && failedSources === dueSources.length
       ? "failed"
       : failedSources || analysisFallbackCount ? "partial" : "success";
-    const analysisMode = acceptedAnalysisModes.size > 1
+    const actualAnalysisModes = new Set(analyzed.map(({ analysis }) => analysis.analysisMode).filter(Boolean));
+    const runAnalysisMode = actualAnalysisModes.size > 1
       ? "mixed"
-      : acceptedAnalysisModes.values().next().value || "rules";
+      : actualAnalysisModes.values().next().value || "none";
     const message = [
       `${dueSources.length}/${sources.length} sources due`,
       `${cadenceSkippedSources} cadence-skipped`,
@@ -326,7 +324,9 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
       skippedCount,
       errorCount: failedSources + analysisFallbackCount,
       analysisRepairCount,
-      analysisMode,
+      configuredProvider: analysisProvider,
+      runAnalysisMode,
+      analysisMode: runAnalysisMode,
       message,
     };
     finishRun(database, runId, result);
@@ -346,7 +346,9 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
         acceptedCount: 0,
         skippedCount: 0,
         errorCount: 1,
-        analysisMode: preferredAnalysisMode,
+        configuredProvider: analysisProvider,
+        runAnalysisMode: "none",
+        analysisMode: "none",
         message: error instanceof Error ? error.message : String(error),
       });
     } else if (persistedResult?.status !== "failed") {

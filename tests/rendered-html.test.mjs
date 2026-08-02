@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import os from "node:os";
 import { after, before, test } from "node:test";
@@ -604,4 +604,19 @@ test("public status endpoint exposes ingestion health without a login", async ()
   assert.equal(typeof status.sourceCount, "number");
   assert.ok(Array.isArray(status.sources));
   assert.match(response.headers.get("cache-control") ?? "", /no-store/);
+});
+
+test("public status endpoint normalizes legacy snapshots that predate provider and run-mode fields", async () => {
+  const snapshotPath = `${dataDirectory}/radar-snapshot.json`;
+  const legacySnapshot = JSON.parse(await readFile(snapshotPath, "utf8"));
+  assert.equal(legacySnapshot.status.analysisMode, "deepseek", "fixture 必须保留旧版可迁移的 analysisMode 权威值");
+  delete legacySnapshot.status.configuredProvider;
+  delete legacySnapshot.status.runAnalysisMode;
+  await writeFile(snapshotPath, `${JSON.stringify(legacySnapshot, null, 2)}\n`, "utf8");
+
+  const response = await render("/api/status");
+  assert.equal(response.status, 200);
+  const status = await response.json();
+  assert.equal(status.configuredProvider, "rules", "当前服务已禁用 AI，旧快照的历史 DeepSeek 语料口径不得冒充当前 configuredProvider");
+  assert.equal(status.runAnalysisMode, "none", "旧快照没有可验证的本轮执行记录，不能把历史文章口径冒充 runAnalysisMode");
 });

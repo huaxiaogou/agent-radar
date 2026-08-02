@@ -99,12 +99,43 @@ export type RadarStatus = {
   lastSuccessfulAt: string | null;
   runStatus: "success" | "partial" | "failed" | "never";
   analysisMode: "rules" | "openai" | "deepseek" | "mixed" | "curated";
+  configuredProvider?: "rules" | "openai" | "deepseek";
+  runAnalysisMode?: "none" | "rules" | "openai" | "deepseek" | "mixed";
   sourceCount: number;
   healthySourceCount: number;
   signalCount: number;
   articleCount: number;
   stale: boolean;
 };
+
+export function analysisStatusLabel(status: Pick<RadarStatus, "analysisMode"> & Partial<Pick<RadarStatus, "configuredProvider" | "runAnalysisMode">>) {
+  const configuredProvider = status.configuredProvider;
+  const runAnalysisMode = status.runAnalysisMode;
+  if (!runAnalysisMode) {
+    if (status.analysisMode === "openai") return "OpenAI 分析";
+    if (status.analysisMode === "deepseek") return "DeepSeek 分析";
+    if (status.analysisMode === "mixed") return "混合分析";
+    if (status.analysisMode === "curated") return "编辑分析";
+    return "规则分析";
+  }
+
+  const configuredLabel = configuredProvider === "openai"
+    ? "OpenAI"
+    : configuredProvider === "deepseek"
+      ? "DeepSeek"
+      : "规则模式";
+  if (runAnalysisMode === "none") return `${configuredLabel} 已配置 · 本轮无新分析`;
+  if (runAnalysisMode === "openai") return "OpenAI 分析";
+  if (runAnalysisMode === "deepseek") return "DeepSeek 分析";
+  if (runAnalysisMode === "mixed") {
+    return configuredProvider && configuredProvider !== "rules"
+      ? `混合分析 · ${configuredLabel} 已配置`
+      : "混合分析";
+  }
+  return configuredProvider && configuredProvider !== "rules"
+    ? `规则分析 · ${configuredLabel} 已配置`
+    : "规则分析";
+}
 
 export type RadarSnapshot = {
   version: 1;
@@ -368,6 +399,8 @@ export const seedRadarSnapshot: RadarSnapshot = {
     lastSuccessfulAt: null,
     runStatus: "never",
     analysisMode: "curated",
+    configuredProvider: "rules",
+    runAnalysisMode: "none",
     sourceCount: sources.length,
     healthySourceCount: sources.length,
     signalCount: signals.length,

@@ -156,6 +156,8 @@ systemctl list-timers agent-radar-ingest.timer
 sudo journalctl -u agent-radar-ingest.service -n 100 --no-pager
 ```
 
+状态接口会分开报告三个分析口径：`configuredProvider` 是当前运行配置解析出的供应商，`runAnalysisMode` 是最近一轮实际处理文章所使用的模式（没有文章进入分析时为 `none`），`analysisMode` 保留为当前历史文章语料中的分析模式，供旧客户端兼容。三者不能互相替代。
+
 Nginx 脚本只管理带有 `# managed-by: agent-radar` 标记的 `radar.jayjp.com` 配置；如果发现同名域名已经由其他配置处理，会直接退出。它会先执行 `nginx -t`，验证失败时恢复原文件，并且不会修改 `agent.jayjp.com` 或 `lona.jayjp.com`。
 
 如果证书未出现在现有 Nginx 配置中，可显式传入证书路径：
