@@ -495,3 +495,29 @@
 - Edge cases found: 5; marker obstacles, marker radius, impossible all-label density, mobile min-content overflow and long names are handled.
 - Questions awaiting review: 0.
 - Next session should read this section, `app/lib/model-landscape-layout.mjs` and `app/models/ModelLandscapeChart.tsx` before changing chart density or interaction.
+
+## Model landscape direct-read session
+
+### Deviations
+
+- The prior interaction-first design kept complete metrics in the inspector. The revised design moves representative models' programming, intelligence and cost values back into the plot because the chart's primary job is direct comparison, while the inspector remains a secondary lookup surface.
+- A strict 18-candidate label set could leave usable whitespace empty when high-priority labels failed collision checks. Placement now explores a broader ranked pool but stops at 12 accepted two-line callouts.
+
+### Discovered edge cases
+
+- SVG paint order can hide a selected marker under a later overlapping point even when it has an active ring. Points now render from lower to higher capability, with the active point painted last.
+- Selecting a model from the full native picker does not guarantee its coordinate is inside a horizontally scrolled viewport. Selection now recenters the chart on that point.
+- Dimming all non-active points to 30% destroys the global distribution while inspecting one model. The context layer now stays at 58% opacity and the active point receives a local callout.
+- The first two-line pass was structurally correct but remained too small at a 1920 px desktop viewport. Persistent names and values now use a larger data type scale, and the collision rectangles were expanded to match the actual rendered glyphs.
+
+### Questions for review
+
+- None. Data, coordinates, ingestion and update cadence remain unchanged; this session only changes information hierarchy and chart interaction.
+
+### Session summary
+
+- Deviations count: 2.
+- Most likely revisit: tune the 12-callout ceiling if a later data payload materially changes chart density.
+- Edge cases found: 4; SVG paint order, off-screen picker selection, over-aggressive context dimming and wide-screen label legibility are handled.
+- Questions awaiting review: 0.
+- Next session should read this section and the preceding legibility session before changing the model chart again.

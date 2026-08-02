@@ -442,18 +442,18 @@ main { width: min(100%, 1600px); margin: 0 auto; padding: 0 clamp(22px, 4vw, 64p
 .model-landscape-inspector > a:focus-visible { outline: 3px solid rgba(49,95,195,.3); outline-offset: 3px; border-radius: 2px; }
 .model-landscape-scroll { width: 100%; max-width: 100%; overflow-x: auto; scrollbar-color: #98aab5 #edf2f4; }
 .model-landscape-scroll:focus-visible { outline-offset: -4px; }
-.model-landscape-plot { display: block; width: 100%; min-width: 1320px; height: auto; color: #27323b; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
-.model-chart-grid line { stroke: #dfe6ea; stroke-width: 1; }
-.model-chart-grid text { fill: #6a7a84; font-size: 11px; }
+.model-landscape-plot { display: block; width: 100%; min-width: 1480px; height: auto; color: #27323b; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.model-chart-grid line { stroke: #d9e2e7; stroke-width: 1.15; }
+.model-chart-grid text { fill: #61747f; font-size: 11.5px; font-weight: 620; }
 .model-chart-axes line { stroke: #50616b; stroke-width: 1.25; }
 .model-chart-axes text { fill: #354750; font-size: 12px; font-weight: 650; letter-spacing: .015em; }
 .model-provider-lines polyline { fill: none; stroke: #27323b; stroke-width: 1.2; opacity: .1; transition: opacity .18s ease, stroke-width .18s ease; }
 .model-provider-lines.has-active polyline { opacity: .025; }
 .model-provider-lines.has-active polyline.is-active { stroke-width: 2; opacity: .48; }
-.model-market-point { opacity: .92; transition: opacity .18s ease; }
-.model-market-points.has-active .model-market-point { opacity: .3; }
+.model-market-point { opacity: 1; transition: opacity .18s ease; }
+.model-market-points.has-active .model-market-point { opacity: .58; }
 .model-market-points.has-active .model-market-point.is-active { opacity: 1; }
-.model-market-point circle, .model-market-point rect, .model-market-point path { stroke: #fff; stroke-width: 2.2; filter: drop-shadow(0 2px 2px rgba(15,42,67,.18)); transition: opacity .18s ease, stroke-width .18s ease; }
+.model-market-point circle, .model-market-point rect, .model-market-point path { stroke: #fff; stroke-width: 2.4; filter: drop-shadow(0 2px 3px rgba(15,42,67,.22)); transition: opacity .18s ease, stroke-width .18s ease; }
 .model-market-point .model-market-hit { fill: transparent; stroke: transparent; filter: none; }
 .model-market-point .model-market-active-ring { fill: rgba(255,255,255,.7); stroke: #102a43; stroke-width: 2; filter: none; }
 .model-market-point:hover circle, .model-market-point:hover rect, .model-market-point:hover path { stroke-width: 4; }
@@ -461,9 +461,17 @@ main { width: min(100%, 1600px); margin: 0 auto; padding: 0 clamp(22px, 4vw, 64p
 .model-market-points a:focus-visible .model-market-point > circle:not(.model-market-hit), .model-market-points a:focus-visible .model-market-point > rect, .model-market-points a:focus-visible .model-market-point > path { stroke: #102a43; stroke-width: 5; }
 .model-market-labels { pointer-events: none; }
 .model-market-labels line { stroke: #71838d; stroke-width: 1; opacity: .42; }
-.model-market-labels text { fill: #21343e; paint-order: stroke; stroke: rgba(255,255,255,.98); stroke-width: 4px; stroke-linejoin: round; font-size: 10.5px; font-weight: 780; }
+.model-market-labels text { fill: #21343e; paint-order: stroke; stroke: rgba(255,255,255,.98); stroke-width: 4.5px; stroke-linejoin: round; }
+.model-market-label-name { font-size: 13.5px; font-weight: 820; }
+.model-market-label-value { fill: #60747f; font-size: 11.5px; font-weight: 720; letter-spacing: .01em; }
 .model-market-labels g.is-active line { stroke: #102a43; stroke-width: 1.5; opacity: .8; }
 .model-market-labels g.is-active text { fill: #102a43; font-weight: 850; }
+.model-market-active-label { pointer-events: none; filter: drop-shadow(0 6px 12px rgba(15,42,67,.15)); }
+.model-market-active-label line { stroke-width: 1.5; opacity: .75; }
+.model-market-active-label rect { fill: rgba(255,255,255,.97); stroke-width: 1.5; }
+.model-market-active-label text { fill: #1d303a; paint-order: stroke; stroke: #fff; stroke-width: 2px; stroke-linejoin: round; }
+.model-market-active-name { font-size: 13.5px; font-weight: 850; }
+.model-market-active-value { fill: #566b76; font-size: 11.5px; font-weight: 740; }
 .model-landscape-scroll-cue { display: none; margin: 0; padding: 9px 14px 0; color: var(--evidence-dark); font-family: var(--font-data); font-size: .75rem; }
 .model-landscape-figure figcaption { margin: 0; padding: 12px 18px 15px; color: #667983; border-top: 1px solid #dfe6ea; font-size: .75rem; }
 .model-landscape-figure figcaption a { color: var(--evidence-dark); font-weight: 700; text-underline-offset: 3px; }
@@ -712,7 +720,7 @@ main { width: min(100%, 1600px); margin: 0 auto; padding: 0 clamp(22px, 4vw, 64p
   .model-landscape-inspector dl { flex-wrap: wrap; gap: 5px 12px; }
   .model-landscape-inspector > a { margin-left: auto; }
   .model-landscape-scroll-cue { display: block; }
-  .model-landscape-plot { min-width: 1320px; }
+  .model-landscape-plot { min-width: 1480px; }
   .table-scroll-cue { display: block; }
   .evidence-boundary { padding: 22px 18px; }
   .evidence-boundary dl { grid-template-columns: 1fr; }

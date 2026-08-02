@@ -554,8 +554,10 @@ test("model atlas compares coding, everyday capability and price with evidence i
   assert.equal(landscape.find("[data-model-id][role='img'][aria-label]").length, 48, "每个模型点必须有完整的无障碍说明");
   assert.equal($(".model-landscape-picker select[name='landscape-model']").length, 1, "重叠圆点必须提供全量模型定位器");
   assert.equal($(".model-landscape-picker option").length, 49, "定位器必须覆盖全部动态模型并保留空选项");
-  assert.ok(landscape.find(".model-market-labels text").length <= 18, "常驻标签必须限制密度，完整数据由交互与表格承载");
+  assert.ok(landscape.find(".model-market-labels text").length <= 12, "常驻标签必须限制密度，完整数据由交互与表格承载");
   assert.ok(landscape.find(".model-market-labels text").length > 0, "全景图需要保留关键模型的常驻标签");
+  assert.equal(landscape.find(".model-market-label-name").length, landscape.find(".model-market-label-value").length, "关键模型名称必须和坐标值成对呈现");
+  assert.ok(landscape.find(".model-market-label-value").length > 0, "图内必须直接显示关键模型的编程、通用和成本坐标");
   assert.ok($(".model-landscape-key span").length >= 10, "厂商图例必须覆盖动态清单中的主要厂商");
   assert.equal($(".model-market-data tbody tr").length, 48, "动态 SVG 必须有全量精确数据表作为无障碍兜底");
   assert.equal(landscape.find("marker, [marker-end], [stroke-dasharray]").length, 0, "整体视图不得保留 DeepSeek 竞争范围虚线或箭头");

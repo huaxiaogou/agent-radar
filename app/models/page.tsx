@@ -134,8 +134,8 @@ export default async function ModelsPage() {
   };
   const yForCoding = (value: number) => landscape.bottom -
     ((value - codingDomain.min) / (codingDomain.max - codingDomain.min)) * (landscape.bottom - landscape.top);
-  const radiusForIntelligence = (value: number) => 4.5 +
-    Math.max(0, Math.min(1, (value - intelligenceDomain.min) / (intelligenceDomain.max - intelligenceDomain.min || 1))) * 7.5;
+  const radiusForIntelligence = (value: number) => 5.25 +
+    Math.max(0, Math.min(1, (value - intelligenceDomain.min) / (intelligenceDomain.max - intelligenceDomain.min || 1))) * 8.25;
   const providerCounts = [...marketModels.reduce((counts, model) => {
     counts.set(model.providerName, (counts.get(model.providerName) || 0) + 1);
     return counts;

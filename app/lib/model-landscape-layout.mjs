@@ -1,17 +1,25 @@
-export const DEFAULT_PERSISTENT_LABEL_LIMIT = 18;
+export const DEFAULT_PERSISTENT_LABEL_LIMIT = 12;
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-function estimatedLabelWidth(value) {
-  const width = [...value].reduce((total, character) => total + (/^[\x00-\x7F]$/.test(character) ? 6.25 : 10.5), 0);
-  return clamp(width + 3, 48, 212);
+function estimatedTextWidth(value) {
+  const width = [...value].reduce((total, character) => total + (/^[\x00-\x7F]$/.test(character) ? 7.7 : 12.5), 0);
+  return clamp(width + 4, 58, 244);
+}
+
+function estimatedLabelWidth(name, metrics) {
+  return Math.max(estimatedTextWidth(name), estimatedTextWidth(metrics));
 }
 
 function displayLabel(value) {
   const characters = [...value];
   return characters.length <= 32 ? value : `${characters.slice(0, 31).join("")}…`;
+}
+
+function displayMetrics(model) {
+  return `编 ${model.codingIndex.toFixed(0)} · 通 ${model.intelligenceIndex.toFixed(0)} · ${model.costLabel}`;
 }
 
 function priorityScore(model) {
@@ -76,7 +84,7 @@ function boxForCandidate(candidate, width) {
     : candidate.anchor === "end"
       ? candidate.x - width
       : candidate.x - width / 2;
-  return { left, right: left + width, top: candidate.y - 12, bottom: candidate.y + 5 };
+  return { left, right: left + width, top: candidate.y - 17, bottom: candidate.y + 22 };
 }
 
 function candidatePositions(model, bounds) {
@@ -84,7 +92,7 @@ function candidatePositions(model, bounds) {
   const verticalDirection = model.y <= (bounds.top + bounds.bottom) / 2 ? 1 : -1;
   const anchorFor = (direction) => direction > 0 ? "start" : "end";
   const near = model.radius + 10;
-  const distances = [near, near + 24, near + 50];
+  const distances = [near, near + 28, near + 58, near + 90];
   const candidates = [];
 
   for (const distance of distances) {
@@ -134,13 +142,15 @@ function connectorEnd(rectangle, candidate) {
 }
 
 export function placePersistentModelLabels(models, bounds, { limit = DEFAULT_PERSISTENT_LABEL_LIMIT } = {}) {
-  const candidates = selectPersistentLabelCandidates(models, limit);
+  const candidates = selectPersistentLabelCandidates(models, Math.min(models.length, Math.max(limit, limit * 4)));
   const occupiedLabels = [];
   const placements = [];
 
   for (const model of candidates) {
+    if (placements.length >= limit) break;
     const label = displayLabel(model.shortName);
-    const width = estimatedLabelWidth(label);
+    const metrics = displayMetrics(model);
+    const width = estimatedLabelWidth(label, metrics);
     for (const candidate of candidatePositions(model, bounds)) {
       const rectangle = boxForCandidate(candidate, width);
       const inside = rectangle.left >= bounds.left + 4
@@ -148,13 +158,14 @@ export function placePersistentModelLabels(models, bounds, { limit = DEFAULT_PER
         && rectangle.top >= bounds.top + 4
         && rectangle.bottom <= bounds.bottom - 4;
       if (!inside) continue;
-      if (occupiedLabels.some((other) => rectanglesOverlap(rectangle, other, 5))) continue;
-      if (models.some((point) => rectangleIntersectsPoint(rectangle, point, 5))) continue;
+      if (occupiedLabels.some((other) => rectanglesOverlap(rectangle, other, 6))) continue;
+      if (models.some((point) => rectangleIntersectsPoint(rectangle, point, 3))) continue;
 
       const end = connectorEnd(rectangle, candidate);
       placements.push({
         modelId: model.id,
         label,
+        metrics,
         x: candidate.x,
         y: candidate.y,
         anchor: candidate.anchor,
