@@ -1148,6 +1148,43 @@ for (const provider of ["deepseek", "openai"]) {
     }
   });
 
+  test(`${provider} retry targets an English-dominant summary instead of repeating title-only guidance`, async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDeepSeekKey = process.env.DEEPSEEK_API_KEY;
+    const originalOpenAIKey = process.env.OPENAI_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    const requestBodies = [];
+    const invalidSummary = deepSeekPublishAnalysis("Agent Harness 增加可恢复检查点");
+    invalidSummary.summary = "此次版本提供了更新说明，但 The official release documents checkpoint recovery and auditable tool execution for long-running coding agents.";
+    const analyses = [invalidSummary, deepSeekPublishAnalysis("Agent Harness 增加可恢复检查点")];
+    globalThis.fetch = async (_url, init) => {
+      const requestBody = JSON.parse(init.body);
+      requestBodies.push(requestBody);
+      const analysis = analyses[Math.min(requestBodies.length - 1, analyses.length - 1)];
+      return providerRawResponse(provider, JSON.stringify(analysis));
+    };
+
+    try {
+      const result = await analyzeItem(providerTestItem(), provider);
+      assert.equal(requestBodies.length, 2, "英文摘要校验失败后只能追加一次修复请求");
+      assert.equal(result.analysisMode, provider);
+      const retryPrompt = provider === "openai"
+        ? requestBodies[1].instructions
+        : requestBodies[1].messages.at(-1).content;
+      assert.match(retryPrompt, /summary 不是中文主导内容/, "重试必须携带摘要的真实失败原因");
+      assert.match(retryPrompt, /重点重写 summary/, "摘要失败必须获得摘要专用纠正指令");
+      assert.match(retryPrompt, /不得复制、拼接或大段保留英文正文/, "摘要重试必须禁止复制英文原文");
+      assert.doesNotMatch(retryPrompt, /重点重写 title/, "摘要失败不能继续只纠正标题");
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDeepSeekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = originalDeepSeekKey;
+      if (originalOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenAIKey;
+    }
+  });
+
   test(`${provider} malformed JSON retry uses a fixed local reason without replaying model output`, async () => {
     const originalFetch = globalThis.fetch;
     const originalDeepSeekKey = process.env.DEEPSEEK_API_KEY;
@@ -1466,6 +1503,8 @@ test("provider instructions demand concise Chinese editing instead of full trans
   try {
     await deepSeekAnalysis(providerTestItem());
     assert.match(systemPrompt, /(?:不是|不要|禁止).{0,12}(?:全文|逐句).{0,4}翻译/, "提示词必须明确要求编辑提炼而不是全文翻译");
+    assert.match(systemPrompt, /title、summary、implication.{0,20}自然中文为主体/, "首次请求必须明确约束三个编辑字段使用自然中文");
+    assert.match(systemPrompt, /不得复制英文标题、句子或正文段落/, "首次请求必须禁止复制英文来源文本");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY;

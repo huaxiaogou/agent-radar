@@ -374,3 +374,27 @@
 - Edge cases found: 4; deterministic retry feedback, invalid legacy LLM rows, irreversible summary truncation and representative/source mismatch are covered.
 - Questions awaiting review: 0.
 - Next session should read this section, `radar/analyze.mjs`, `radar/backfill.mjs`, `radar/snapshot.mjs` and `app/components/SignalCard.tsx` before changing editorial retry, migration or source-link behavior.
+
+## Field-aware Chinese correction session
+
+### Deviations
+
+- The initial implementation scoped the fix to retry feedback. Review showed that prevention belongs in the first provider instruction as well: the base prompt now defines Chinese-led behavior for every editorial field, while retries still target the field named by the unchanged local validator.
+
+### Discovered edge cases
+
+- A `summary` or `implication` failure must not receive title-only guidance; otherwise the single retry can repeat the invalid field even though the local gate reported it precisely.
+- A generic request for “Chinese structured analysis” does not prevent a model from copying English release-note prose. The first request now forbids English titles, sentences and paragraphs except for irreducible technical names.
+- Stronger language requirements must not encourage ratio gaming. The correction forbids meaningless Han padding and fabricated facts while retaining necessary product names, framework names, acronyms and versions.
+
+### Questions for review
+
+- None. Chinese thresholds, provider retry count, source content, publication readiness and fallback behavior remain unchanged.
+
+### Session summary
+
+- Deviations count: 1.
+- Most likely revisit: add provider-side language constraints only if a stable structured-output contract can express them directly.
+- Edge cases found: 3; under-specified first-pass language, wrong-field retry guidance and Han-ratio gaming are covered.
+- Questions awaiting review: 0.
+- Next session should read this section and `retryCorrection` in `radar/analyze.mjs` before changing editorial prompts or validation feedback.
