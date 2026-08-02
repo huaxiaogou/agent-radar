@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import {
   getArticleCount,
   getLatestRun,
+  getModelLandscapeState,
   getPublishedArticlesForBackfill,
   getRecentArticles,
   getRecentCandidateArticles,
@@ -383,6 +384,7 @@ export async function buildSnapshot(database) {
   const lastSuccessfulAt = successfulRun?.finished_at || null;
   const configuredProvider = latestRun?.configured_provider || "rules";
   const runAnalysisMode = latestRun?.analysis_mode || "none";
+  const modelLandscapeState = getModelLandscapeState(database);
   const publicSignals = signals.map((signal) => {
     const publicSignal = { ...signal };
     delete publicSignal.relevanceScore;
@@ -411,6 +413,10 @@ export async function buildSnapshot(database) {
     concepts: await buildConcepts(signals),
     candidateConcepts: buildCandidateConcepts(candidateRows),
     modelPulses: await buildModelPulses(articleRows),
+    modelLandscape: {
+      ...modelLandscapeState,
+      stale: !modelLandscapeState.lastSuccessAt || Date.now() - dateValue(modelLandscapeState.lastSuccessAt) > 48 * 3_600_000,
+    },
     sources,
     relations: RELATIONS,
     playbooks: PLAYBOOKS,

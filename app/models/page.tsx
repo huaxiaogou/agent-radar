@@ -11,7 +11,7 @@ import {
   resolveModelPrice,
   type CapabilityBand,
 } from "../lib/model-data";
-import type { ModelPulse } from "../lib/radar-data";
+import type { ModelLandscapePoint, ModelPulse } from "../lib/radar-data";
 import { getRadarSnapshot } from "../lib/radar-store";
 
 export const dynamic = "force-dynamic";
@@ -53,38 +53,36 @@ function formattedTime(value: string | null) {
   }).format(new Date(value));
 }
 
-const landscape = { left: 92, right: 936, top: 98, bottom: 472 };
-const outputPriceTicks = [0.25, 0.5, 1, 2, 5, 10, 20, 50];
-const outputPriceDomain = { min: 0.2, max: 64 };
-const providerLegend = [
-  { name: "OpenAI", className: "provider-openai" },
-  { name: "Anthropic", className: "provider-anthropic" },
-  { name: "Google", className: "provider-google" },
-  { name: "DeepSeek", className: "provider-deepseek" },
-] as const;
-const modelLabelOffsets: Record<string, { dx: number; dy: number; anchor: "start" | "middle" | "end" }> = {
-  "gpt-5-6-sol": { dx: 0, dy: 62, anchor: "middle" },
-  "gpt-5-6-terra": { dx: 13, dy: 31, anchor: "start" },
-  "claude-fable-5": { dx: -8, dy: -48, anchor: "end" },
-  "claude-opus-5": { dx: -18, dy: -20, anchor: "end" },
-  "claude-sonnet-5": { dx: 12, dy: 32, anchor: "start" },
-  "gemini-3-6-flash": { dx: -13, dy: -16, anchor: "end" },
-  "deepseek-v4-pro": { dx: 13, dy: -16, anchor: "start" },
-  "deepseek-v4-flash": { dx: 13, dy: -16, anchor: "start" },
+const landscape = { left: 112, right: 1518, top: 74, bottom: 710 };
+const providerPalette = ["#27323b", "#bc684b", "#339466", "#315fc3", "#8a55a7", "#d08a23", "#167f89", "#d24c68", "#6b7f2a", "#825f49", "#526cc7", "#a4422a", "#477281", "#8a6d1f"];
+const fixedProviderColors: Record<string, string> = {
+  OpenAI: "#27323b", Anthropic: "#bc684b", Google: "#339466", DeepSeek: "#315fc3",
+  SpaceXAI: "#526cc7", Alibaba: "#d08a23", Meta: "#167f89", Mistral: "#8a55a7",
+  Amazon: "#c47728", Kimi: "#6b7f2a", NVIDIA: "#825f49", Xiaomi: "#a4422a", Arcee: "#477281",
 };
 
-function outputPriceX(value: number) {
-  const ratio = (Math.log(value) - Math.log(outputPriceDomain.min)) /
-    (Math.log(outputPriceDomain.max) - Math.log(outputPriceDomain.min));
-  return landscape.left + Math.max(0, Math.min(1, ratio)) * (landscape.right - landscape.left);
+function logTicks(minimum: number, maximum: number) {
+  const candidates = [0.005, 0.01, 0.02, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 3, 5, 10];
+  return candidates.filter((value) => value >= minimum && value <= maximum);
 }
 
-function codingBandY(value: CapabilityBand) {
-  return landscape.bottom - ((value - 1) / 4) * (landscape.bottom - landscape.top);
+function costLabel(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: value < 1 ? 2 : 0,
+    maximumFractionDigits: value < 0.01 ? 3 : value < 1 ? 2 : 1,
+  }).format(value);
 }
 
-function everydayRadius(value: CapabilityBand) {
-  return 4.5 + value * 1.45;
+function familyKey(model: ModelLandscapePoint) {
+  return `${model.providerSlug}:${model.shortName.toLowerCase().replace(/\s*\((?:low|medium|high|max|xhigh|thinking|reasoning)[^)]*\)\s*$/i, "").trim()}`;
+}
+
+function providerShape(model: ModelLandscapePoint) {
+  if (model.isOpenWeights) return "diamond";
+  if (model.isReasoning) return "circle";
+  return "square";
 }
 
 export default async function ModelsPage() {
@@ -113,14 +111,92 @@ export default async function ModelsPage() {
     day: "2-digit",
   }).format(new Date(modelDataVerifiedAt));
   const pulseAt = snapshot.status.lastSuccessfulAt;
-  const plottedModels = displayModels.map((model) => ({
+  const marketModels = snapshot.modelLandscape.models;
+  const costs = marketModels.map((model) => model.costPerTask);
+  const codingScores = marketModels.map((model) => model.codingIndex);
+  const intelligenceScores = marketModels.map((model) => model.intelligenceIndex);
+  const costDomain = {
+    min: Math.max(0.001, (Math.min(...costs, 0.01) || 0.01) * 0.72),
+    max: Math.max(1, (Math.max(...costs, 1) || 1) * 1.32),
+  };
+  const codingDomain = {
+    min: Math.max(0, Math.floor((Math.min(...codingScores, 0) || 0) / 10) * 10),
+    max: Math.max(10, Math.ceil((Math.max(...codingScores, 10) || 10) / 10) * 10),
+  };
+  const intelligenceDomain = {
+    min: Math.min(...intelligenceScores, 0) || 0,
+    max: Math.max(...intelligenceScores, 1) || 1,
+  };
+  const xForCost = (value: number) => {
+    const ratio = (Math.log(value) - Math.log(costDomain.min)) / (Math.log(costDomain.max) - Math.log(costDomain.min));
+    return landscape.left + Math.max(0, Math.min(1, ratio)) * (landscape.right - landscape.left);
+  };
+  const yForCoding = (value: number) => landscape.bottom -
+    ((value - codingDomain.min) / (codingDomain.max - codingDomain.min)) * (landscape.bottom - landscape.top);
+  const radiusForIntelligence = (value: number) => 4.5 +
+    Math.max(0, Math.min(1, (value - intelligenceDomain.min) / (intelligenceDomain.max - intelligenceDomain.min || 1))) * 7.5;
+  const providerCounts = [...marketModels.reduce((counts, model) => {
+    counts.set(model.providerName, (counts.get(model.providerName) || 0) + 1);
+    return counts;
+  }, new Map<string, number>())].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+  const primaryProviders = providerCounts.slice(0, 13).map(([name]) => name);
+  const providerColor = (name: string) => {
+    if (!primaryProviders.includes(name)) return providerPalette.at(-1)!;
+    if (fixedProviderColors[name]) return fixedProviderColors[name];
+    const hash = [...name].reduce((total, character) => total + character.codePointAt(0)!, 0);
+    return providerPalette[hash % (providerPalette.length - 1)];
+  };
+  const providerLegend = [
+    ...primaryProviders.map((name) => ({ name, color: providerColor(name), count: providerCounts.find(([provider]) => provider === name)?.[1] || 0 })),
+    ...(providerCounts.length > primaryProviders.length
+      ? [{ name: "Other", color: providerPalette.at(-1)!, count: providerCounts.slice(primaryProviders.length).reduce((total, [, count]) => total + count, 0) }]
+      : []),
+  ];
+  const plottedModels = marketModels.map((model) => ({
     ...model,
-    x: outputPriceX(model.effectivePrice.output),
-    y: codingBandY(model.coding),
-    radius: everydayRadius(model.everyday),
-    providerClass: `provider-${model.provider.toLowerCase()}`,
-    label: modelLabelOffsets[model.id],
+    x: xForCost(model.costPerTask),
+    y: yForCoding(model.codingIndex),
+    radius: radiusForIntelligence(model.intelligenceIndex),
+    color: providerColor(model.providerName),
+    shape: providerShape(model),
   }));
+  const costTicks = logTicks(costDomain.min, costDomain.max);
+  const codingTicks = Array.from(
+    { length: Math.floor((codingDomain.max - codingDomain.min) / 10) + 1 },
+    (_, index) => codingDomain.min + index * 10,
+  );
+  const families = [...plottedModels.reduce((groups, model) => {
+    const key = familyKey(model);
+    const group = groups.get(key) || [];
+    group.push(model);
+    groups.set(key, group);
+    return groups;
+  }, new Map<string, typeof plottedModels>()).values()].filter((models) => models.length > 1);
+  const occupiedLabels: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+  const labelPlacements = new Map<string, { x: number; y: number; anchor: "start" | "end"; showMeta: boolean }>();
+  const labelOffsets: Array<{ dx: number; dy: number; anchor: "start" | "end" }> = [
+    { dx: 10, dy: -9, anchor: "start" }, { dx: 10, dy: 21, anchor: "start" },
+    { dx: -10, dy: -9, anchor: "end" }, { dx: -10, dy: 21, anchor: "end" },
+  ];
+  for (const [index, model] of plottedModels.slice(0, 92).entries()) {
+    const width = Math.min(150, Math.max(45, model.shortName.length * 6.1));
+    for (const offset of labelOffsets) {
+      const x = model.x + offset.dx;
+      const y = model.y + offset.dy;
+      const box = {
+        left: offset.anchor === "start" ? x : x - width,
+        right: offset.anchor === "start" ? x + width : x,
+        top: y - 11,
+        bottom: y + (index < 28 ? 15 : 2),
+      };
+      const inside = box.left >= landscape.left && box.right <= landscape.right && box.top >= landscape.top && box.bottom <= landscape.bottom;
+      const overlaps = occupiedLabels.some((other) => !(box.right + 3 < other.left || box.left - 3 > other.right || box.bottom + 2 < other.top || box.top - 2 > other.bottom));
+      if (!inside || overlaps) continue;
+      occupiedLabels.push(box);
+      labelPlacements.set(model.id, { x, y, anchor: offset.anchor, showMeta: index < 28 });
+      break;
+    }
+  }
 
   return (
     <AppShell active="models" status={snapshot.status}>
@@ -132,9 +208,14 @@ export default async function ModelsPage() {
         </div>
         <div className="model-verification-grid">
           <div className="model-verification">
-            <span>能力 / 价格核验</span>
+            <span>市场全景更新</span>
+            <time dateTime={snapshot.modelLandscape.lastSuccessAt || undefined}>{formattedTime(snapshot.modelLandscape.lastSuccessAt)}</time>
+            <small>{marketModels.length || "—"} 个动态模型</small>
+          </div>
+          <div className="model-verification">
+            <span>精确对照核验</span>
             <time dateTime={modelDataVerifiedAt}>{verifiedDate}</time>
-            <small>{displayModels.length} 个当前模型</small>
+            <small>{displayModels.length} 个编辑核验模型</small>
           </div>
           <div className="model-verification is-pulse">
             <span>社区脉冲更新</span>
@@ -150,75 +231,94 @@ export default async function ModelsPage() {
             <span className="mono-label">01 / COST × CODING LANDSCAPE</span>
             <h2 id="capability-map-title">能力—成本全景</h2>
           </div>
-          <p>横轴是输出价格的对数刻度，纵轴是编程能力档，圆点大小表示日常能力档；所有模型使用同一口径，不突出某个厂商。</p>
+          <p>横轴是 Intelligence Index 基准中的单任务成本，纵轴是编程指数，点面积表示通用智能指数。开源权重用菱形表示，避免只靠颜色识别。</p>
         </div>
 
         <div className="model-atlas-layout">
           <figure className="model-landscape-figure">
             <div className="model-landscape-key" aria-label="模型厂商图例">
               <div>
-                {providerLegend.map((provider) => <span key={provider.name}><i className={provider.className} aria-hidden="true" />{provider.name}</span>)}
+                {providerLegend.map((provider) => <span key={provider.name}><i style={{ backgroundColor: provider.color }} aria-hidden="true" />{provider.name} <small>{provider.count}</small></span>)}
               </div>
-              <p><i aria-hidden="true" />圆点越大，日常能力档越高</p>
+              <p><i aria-hidden="true" />点越大，通用智能指数越高</p>
             </div>
-            <p className="model-landscape-scroll-cue"><span aria-hidden="true">↔</span> 横向滑动查看完整模型分布</p>
-            <div className="model-landscape-scroll" tabIndex={0} aria-label="模型能力成本全景图，可横向滚动">
-              <svg className="model-landscape-plot" viewBox="0 0 1000 548" role="img" aria-labelledby="model-landscape-title model-landscape-description">
-                <title id="model-landscape-title">主流模型能力—成本全景</title>
-                <desc id="model-landscape-description">横轴为每百万输出 tokens 的美元价格，对数刻度；纵轴为编程能力一至五档；圆点大小为日常能力档；颜色区分厂商。</desc>
+            {marketModels.length > 0 && <>
+              <p className="model-landscape-scroll-cue"><span aria-hidden="true">↔</span> 横向滑动查看完整模型分布</p>
+              <div className="model-landscape-scroll" tabIndex={0} aria-label="模型能力成本全景图，可横向滚动">
+              <svg className="model-landscape-plot" viewBox="0 0 1600 820" role="img" aria-labelledby="model-landscape-title model-landscape-description">
+                <title id="model-landscape-title">动态模型编程能力—成本全景</title>
+                <desc id="model-landscape-description">横轴为 Artificial Analysis Intelligence Index 的美元单任务成本，对数刻度；纵轴为编程指数；点面积为通用智能指数；颜色区分厂商，菱形表示开源权重。</desc>
                 <g className="model-chart-grid" aria-hidden="true">
-                  {([1, 2, 3, 4, 5] as CapabilityBand[]).map((band) => {
-                    const y = codingBandY(band);
-                    return <g key={band}><line x1={landscape.left} x2={landscape.right} y1={y} y2={y} /><text x={landscape.left - 14} y={y + 4} textAnchor="end">{band} · {capabilityBandLabels[band]}</text></g>;
+                  {codingTicks.map((score) => {
+                    const y = yForCoding(score);
+                    return <g key={score}><line x1={landscape.left} x2={landscape.right} y1={y} y2={y} /><text x={landscape.left - 14} y={y + 4} textAnchor="end">{score}</text></g>;
                   })}
-                  {outputPriceTicks.map((price) => {
-                    const x = outputPriceX(price);
-                    return <g key={price}><line x1={x} x2={x} y1={landscape.top} y2={landscape.bottom} /><text x={x} y={landscape.bottom + 28} textAnchor="middle">${price}</text></g>;
+                  {costTicks.map((price) => {
+                    const x = xForCost(price);
+                    return <g key={price}><line x1={x} x2={x} y1={landscape.top} y2={landscape.bottom} /><text x={x} y={landscape.bottom + 28} textAnchor="middle">{costLabel(price)}</text></g>;
                   })}
                 </g>
                 <g className="model-chart-axes" aria-hidden="true">
                   <line x1={landscape.left} x2={landscape.left} y1={landscape.top} y2={landscape.bottom} />
                   <line x1={landscape.left} x2={landscape.right} y1={landscape.bottom} y2={landscape.bottom} />
-                  <text x={(landscape.left + landscape.right) / 2} y="532" textAnchor="middle">输出价格 / 百万 tokens（USD，对数刻度）</text>
-                  <text transform="rotate(-90 22 285)" x="22" y="285" textAnchor="middle">编程能力档</text>
+                  <text x={(landscape.left + landscape.right) / 2} y="784" textAnchor="middle">单任务成本（USD，对数刻度）</text>
+                  <text transform="rotate(-90 34 390)" x="34" y="390" textAnchor="middle">编程指数</text>
                 </g>
                 <g className="model-provider-lines" aria-hidden="true">
-                  {providerLegend.map((provider) => {
-                    const points = plottedModels.filter((model) => model.provider === provider.name).sort((left, right) => left.x - right.x);
-                    if (points.length < 2) return null;
-                    return <polyline className={provider.className} points={points.map((point) => `${point.x},${point.y}`).join(" ")} key={provider.name} />;
-                  })}
+                  {families.map((points) => <polyline style={{ stroke: points[0].color }} points={points.sort((left, right) => left.costPerTask - right.costPerTask).map((point) => `${point.x},${point.y}`).join(" ")} key={familyKey(points[0])} />)}
                 </g>
                 <g className="model-market-points">
                   {plottedModels.map((model) => (
-                    <g
-                      className={`model-market-point ${model.providerClass}`}
-                      data-model-id={model.id}
-                      data-provider={model.provider}
-                      role="img"
-                      aria-label={`${model.name}：编程 ${model.coding}/5，日常 ${model.everyday}/5，输出 ${formatTokenPrice(model.effectivePrice.output)} / 百万 tokens`}
-                      key={model.id}
-                    >
-                      <circle cx={model.x} cy={model.y} r={model.radius} />
-                      <text x={model.x + model.label.dx} y={model.y + model.label.dy} textAnchor={model.label.anchor}>
-                        <tspan className="model-market-name" lang="en">{model.name}</tspan>
-                        <tspan className="model-market-meta" x={model.x + model.label.dx} dy="15">编 {model.coding}/5 · 日 {model.everyday}/5 · {formatTokenPrice(model.effectivePrice.output)}</tspan>
-                      </text>
-                    </g>
+                    <a href={model.href} target="_blank" rel="noreferrer" aria-label={`查看 ${model.name} 的指标原页`} key={model.id}>
+                      <g
+                        className="model-market-point"
+                        data-model-id={model.id}
+                        data-provider={model.providerName}
+                        role="img"
+                        aria-label={`${model.name}：编程指数 ${model.codingIndex}，通用智能指数 ${model.intelligenceIndex}，单任务成本 ${costLabel(model.costPerTask)}`}
+                      >
+                        <circle className="model-market-hit" cx={model.x} cy={model.y} r="22" />
+                        {model.shape === "diamond"
+                          ? <path d={`M ${model.x} ${model.y - model.radius} L ${model.x + model.radius} ${model.y} L ${model.x} ${model.y + model.radius} L ${model.x - model.radius} ${model.y} Z`} style={{ fill: model.color }} />
+                          : model.shape === "square"
+                            ? <rect x={model.x - model.radius * .82} y={model.y - model.radius * .82} width={model.radius * 1.64} height={model.radius * 1.64} rx="2" style={{ fill: model.color }} />
+                            : <circle cx={model.x} cy={model.y} r={model.radius} style={{ fill: model.color }} />}
+                        {labelPlacements.has(model.id) && (() => {
+                          const label = labelPlacements.get(model.id)!;
+                          return <text x={label.x} y={label.y} textAnchor={label.anchor}>
+                            <tspan className="model-market-name" lang="en">{model.shortName}</tspan>
+                            {label.showMeta && <tspan className="model-market-meta" x={label.x} dy="14">编 {model.codingIndex.toFixed(0)} · 通 {model.intelligenceIndex.toFixed(0)} · {costLabel(model.costPerTask)}</tspan>}
+                          </text>;
+                        })()}
+                      </g>
+                    </a>
                   ))}
                 </g>
               </svg>
-            </div>
-            <figcaption>细实线仅连接同厂商的当前产品线，不表示演进顺序。这里使用可核验的 API 输出价格，不虚构统一 token 预算下的“单任务成本”；精确输入价、上下文和近期讨论见下表。</figcaption>
+              </div>
+            </>}
+            <figcaption>
+              数据源：<a href={snapshot.modelLandscape.sourceUrl} target="_blank" rel="noreferrer">{snapshot.modelLandscape.sourceName} ↗</a>，
+              <a href={snapshot.modelLandscape.methodologyUrl} target="_blank" rel="noreferrer">指标方法 ↗</a>。
+              最后成功更新 {formattedTime(snapshot.modelLandscape.lastSuccessAt)}；细实线只连接同一模型家族变体，不表示演进顺序。
+              {snapshot.modelLandscape.lastError && <span className="model-landscape-warning"> 本轮失败，已保留上次快照。</span>}
+            </figcaption>
+            {marketModels.length > 0 && <details className="model-market-data">
+              <summary>查看全部 {marketModels.length} 个模型的精确数据</summary>
+              <div><table><caption>动态模型全景原始指标表</caption><thead><tr><th scope="col">模型</th><th scope="col">厂商</th><th scope="col">编程指数</th><th scope="col">通用智能指数</th><th scope="col">单任务成本</th><th scope="col">开源权重</th></tr></thead><tbody>
+                {marketModels.map((model) => <tr key={`market-${model.id}`}><th scope="row"><a href={model.href} target="_blank" rel="noreferrer">{model.name} ↗</a></th><td>{model.providerName}</td><td>{model.codingIndex}</td><td>{model.intelligenceIndex}</td><td>{costLabel(model.costPerTask)}</td><td>{model.isOpenWeights ? "是" : "否"}</td></tr>)}
+              </tbody></table></div>
+            </details>}
+            {marketModels.length === 0 && <p className="model-landscape-empty">等待首次动态模型采集；下方 8 个模型的编辑核验对照仍可使用。</p>}
           </figure>
 
           <aside className="evidence-boundary" aria-labelledby="evidence-boundary-title">
             <span className="mono-label">EVIDENCE BOUNDARY</span>
             <h2 id="evidence-boundary-title">证据口径</h2>
             <dl>
-              <div><dt>官方事实</dt><dd>模型名称、上下文窗口、公开价格与促销期限来自厂商页面。</dd></div>
-              <div><dt>编程能力档</dt><dd>{capabilityRubric.coding}</dd></div>
-              <div><dt>日常能力档</dt><dd>{capabilityRubric.everyday}</dd></div>
+              <div><dt>动态全景</dt><dd>独立基准的 Coding Index、Intelligence Index 与每任务成本；随定时采集更新。</dd></div>
+              <div><dt>编辑对照</dt><dd>下方 8 个重点模型的官方价格、上下文与场景判断按核验日期维护。</dd></div>
+              <div><dt>能力判断</dt><dd>{capabilityRubric.coding} {capabilityRubric.everyday}</dd></div>
               <div><dt>社区脉冲</dt><dd>按模型名称匹配近期已收录来源，拆分官方、实践者和社区；它不是模型评测。</dd></div>
               <div><dt>禁止误读</dt><dd>不同 harness、工具权限、提示词和 token 预算下的成绩不可硬比较。</dd></div>
             </dl>

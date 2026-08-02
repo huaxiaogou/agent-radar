@@ -199,10 +199,13 @@ async function cancelResponseBody(response) {
   } catch {}
 }
 
-async function readBoundedResponseBody(response) {
+async function readBoundedResponseBody(response, { asBuffer = false } = {}) {
   if (!response.body?.getReader) {
-    const body = await response.text();
-    if (Buffer.byteLength(body) > MAX_RESPONSE_BYTES) throw new Error("响应超过 5 MiB");
+    const body = asBuffer
+      ? Buffer.from(await response.arrayBuffer())
+      : await response.text();
+    const size = asBuffer ? body.byteLength : Buffer.byteLength(body);
+    if (size > MAX_RESPONSE_BYTES) throw new Error("响应超过 5 MiB");
     return body;
   }
   const reader = response.body.getReader();
@@ -232,14 +235,15 @@ async function readBoundedResponseBody(response) {
     }
     throw error;
   }
-  return Buffer.concat(chunks, totalBytes).toString("utf8");
+  const body = Buffer.concat(chunks, totalBytes);
+  return asBuffer ? body : body.toString("utf8");
 }
 
 export function contentHash(...parts) {
   return createHash("sha256").update(parts.join("\n")).digest("hex");
 }
 
-export async function fetchPublicText(url, options = {}) {
+async function fetchPublicResource(url, options = {}, { asBuffer = false } = {}) {
   const customFetch = Object.hasOwn(options, "fetchImpl");
   const fetchImpl = customFetch ? options.fetchImpl : NATIVE_FETCH;
   const { resolveHostname, createDispatcher = defaultCreateDispatcher, maxRedirects = MAX_REDIRECTS } = options;
@@ -285,13 +289,21 @@ export async function fetchPublicText(url, options = {}) {
         await cancelResponseBody(response);
         throw new Error(`响应过大：${contentLength} bytes`);
       }
-      const body = await readBoundedResponseBody(response);
+      const body = await readBoundedResponseBody(response, { asBuffer });
       return { body, finalUrl: currentUrl, contentType: response.headers.get("content-type") || "" };
     } finally {
       await dispatcher.close?.();
     }
   }
   throw new Error(`重定向超过 ${maxRedirects} 次`);
+}
+
+export function fetchPublicText(url, options = {}) {
+  return fetchPublicResource(url, options, { asBuffer: false });
+}
+
+export function fetchPublicBytes(url, options = {}) {
+  return fetchPublicResource(url, options, { asBuffer: true });
 }
 
 async function fetchText(url, attempts = 2, fetchOptions = {}) {

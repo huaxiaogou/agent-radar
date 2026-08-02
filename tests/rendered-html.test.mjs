@@ -45,6 +45,7 @@ async function createProductionSnapshotFixture() {
     finishRun,
     insertArticle,
     openDatabase,
+    replaceModelLandscape,
     updateSourceHealth,
     upsertSourceCatalog,
   } = await import("../radar/database.mjs");
@@ -311,6 +312,29 @@ async function createProductionSnapshotFixture() {
       error: null,
       itemCount: 1,
     });
+    replaceModelLandscape(database, {
+      sourceName: "Artificial Analysis",
+      sourceUrl: "https://artificialanalysis.ai/models",
+      methodologyUrl: "https://artificialanalysis.ai/articles/artificial-analysis-intelligence-index-v4-1/",
+      attemptedAt: collectedAt,
+      models: Array.from({ length: 48 }, (_, index) => ({
+        id: `rendered-model-${index}`,
+        slug: `rendered-model-${index}`,
+        name: `Rendered Model ${index} ${index % 3 === 0 ? "(high)" : ""}`.trim(),
+        shortName: `Rendered Model ${index}`,
+        providerName: ["OpenAI", "Anthropic", "Google", "DeepSeek", "Alibaba", "Meta", "Mistral", "Amazon", "NVIDIA", "Kimi"][index % 10],
+        providerSlug: ["openai", "anthropic", "google", "deepseek", "alibaba", "meta", "mistral", "amazon", "nvidia", "kimi"][index % 10],
+        providerColor: null,
+        codingIndex: 22 + index,
+        intelligenceIndex: 12 + index * .8,
+        costPerTask: .008 + index * .035,
+        isReasoning: index % 2 === 0,
+        isOpenWeights: index % 3 === 0,
+        releaseDate: "2026-08-01",
+        contextWindowTokens: 128000,
+        href: `https://artificialanalysis.ai/models/rendered-model-${index}`,
+      })),
+    });
     const snapshot = await buildSnapshot(database);
     const oldSnapshotSignal = snapshot.signals.find((item) => item.slug === secondSignalSlug);
     assert.ok(oldSnapshotSignal);
@@ -525,18 +549,15 @@ test("model atlas compares coding, everyday capability and price with evidence i
   assert.equal(landscape.length, 1, "模型页必须提供能力—成本全景图");
   assert.match(landscape.attr("aria-labelledby") || "", /model-landscape-title/);
   const landscapeText = $(".model-landscape-figure").text().replace(/\s+/g, " ");
-  for (const term of ["输出价格", "对数刻度", "编程能力档", "日常能力档"]) assert.match(landscapeText, new RegExp(term));
-  assert.equal(landscape.find("[data-model-id]").length, 8, "全景图必须完整绘制八个当前模型");
-  assert.equal(landscape.find("[data-model-id][role='img'][aria-label]").length, 8, "每个模型点必须有完整的无障碍说明");
-  assert.deepEqual(
-    landscape.find("[data-model-id]").toArray().map((node) => $(node).attr("data-model-id")),
-    ["gpt-5-6-sol", "gpt-5-6-terra", "claude-fable-5", "claude-opus-5", "claude-sonnet-5", "gemini-3-6-flash", "deepseek-v4-pro", "deepseek-v4-flash"],
-  );
-  assert.equal($(".model-landscape-key span").length, 4, "厂商颜色图例必须覆盖四个当前厂商");
+  for (const term of ["单任务成本", "对数刻度", "编程指数", "通用智能指数"]) assert.match(landscapeText, new RegExp(term));
+  assert.equal(landscape.find("[data-model-id]").length, 48, "全景图必须完整绘制定时采集的所有动态模型");
+  assert.equal(landscape.find("[data-model-id][role='img'][aria-label]").length, 48, "每个模型点必须有完整的无障碍说明");
+  assert.ok($(".model-landscape-key span").length >= 10, "厂商图例必须覆盖动态清单中的主要厂商");
+  assert.equal($(".model-market-data tbody tr").length, 48, "动态 SVG 必须有全量精确数据表作为无障碍兜底");
   assert.equal(landscape.find("marker, [marker-end], [stroke-dasharray]").length, 0, "整体视图不得保留 DeepSeek 竞争范围虚线或箭头");
   assert.doesNotMatch($(".model-landscape-figure").text(), /竞争范围|本站分析模型/, "全景图不能特殊突出 DeepSeek Flash");
 
-  const comparison = $("table").first();
+  const comparison = $("table.model-table").first();
   assert.equal(comparison.length, 1, "可视化必须有精确表格作为无障碍兜底");
   assert.ok(comparison.find("caption").text().trim(), "模型对比表需要 caption");
   const headers = comparison.find("th").text().replace(/\s+/g, " ");
@@ -692,6 +713,9 @@ test("public status endpoint exposes ingestion health without a login", async ()
   assert.ok(["live", "seed"].includes(status.mode));
   assert.equal(typeof status.sourceCount, "number");
   assert.ok(Array.isArray(status.sources));
+  assert.equal(status.modelLandscape.itemCount, 48);
+  assert.equal(status.modelLandscape.source, "Artificial Analysis");
+  assert.equal(typeof status.modelLandscape.stale, "boolean");
   assert.match(response.headers.get("cache-control") ?? "", /no-store/);
 });
 

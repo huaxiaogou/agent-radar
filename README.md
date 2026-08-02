@@ -11,7 +11,7 @@ Agent Radar 是一个面向 AI Coding 与 Agent 工程实践的个人技术情�
 - `/discussions`：统一展示中文与英文社区讨论、证据层级和原文；社区热度不等于事实或能力。
 - `/concepts`：可修订的正式概念索引，以及与正式目录隔离、保留原文的 LLM 待溯源概念候选。
 - `/graph`：概念关系图及无障碍文本替代。
-- `/models`：完整模型名的能力轨道、日常能力、上下文、API 价格与定时更新的 7/30 日讨论脉冲。
+- `/models`：定时刷新的数十至上百模型“编程指数 × 单任务成本”全景、8 个重点模型的编辑核验对照，以及定时更新的 7/30 日讨论脉冲。
 - `/sources`：按官方、实践者/技术媒体、社区三层统一管理的多语言来源注册表。
 - `/playbooks`、`/digests`、`/search`：方法库、周报和跨对象搜索。
 
@@ -23,7 +23,7 @@ Agent Radar 是一个面向 AI Coding 与 Agent 工程实践的个人技术情�
 
 网站是公开只读访问，不要求登录。采集入口仅存在于服务器脚本和 systemd，不对公网暴露写接口。
 
-`/models` 有两条时间轴：名称、上下文与价格是带核验日期和厂商原始链接的编辑数据；能力 1–5 档是 Radar 的方向性选型判断，不是统一 benchmark，这些字段不会被四小时任务或 LLM 静默改写。模型相关的官方、实践者和社区讨论计数及原文链接会随定时采集更新。
+`/models` 有三条独立时间轴：全景图的 Coding Index、Intelligence Index 和每任务成本来自 Artificial Analysis 公开模型清单，systemd 默认每 24 小时刷新；下方 8 个重点模型的上下文、API 价格和 1–5 档场景判断是带核验日期与厂商链接的编辑数据；官方、实践者和社区的 7/30 日讨论脉冲随文章采集更新。三者不互相冒充。
 
 ## 本地运行
 
@@ -154,9 +154,10 @@ npm run ai:check
 3. 进行中英文宽召回，按来源轮询顺序对全部未见候选补全正文并做二次相关性检查；发布上限不会提前截断正文补全或 LLM 分析。官方、实践者与社区证据分别计数，社区重复不能自行升级为高置信。
 4. 所有通过正文补全与发现阈值的候选都由 `RADAR_AI_PROVIDER` 指定的 DeepSeek Chat Completions 或 OpenAI Responses API 生成 publish/watch/reject 决策和中文编辑结果，再按 eventKey、版本和概念边界聚类。模型最终失败只记录任务错误且不落成公开文章，下轮扫描可继续重试；证据不足的新概念候选会隔离保存，等待后续溯源，不参与公开信号与正式概念排序。
 5. 在 `.data/agent-radar.sqlite` 中提交文章、来源健康度和任务记录。
-6. 生成 `.data/radar-snapshot.json` 临时文件，完整写入并同步后原子替换线上快照。
+6. 按独立 cadence 刷新 Artificial Analysis 公开模型清单，解析编程指数、通用智能指数与每任务成本。只有结构完整且数量不低于安全阈值才原子替换 SQLite 中的上次模型快照；失败只记录错误。
+7. 生成 `.data/radar-snapshot.json` 临时文件，完整写入并同步后原子替换线上快照。
 
-systemd 每四小时唤醒一次采集服务；每个来源再按 `config/sources.json` 的 4h/8h/12h/24h cadence 判断是否到期。手工执行 `npm run ingest` 会忽略 cadence 并立即扫描全部启用来源。
+systemd 每四小时唤醒一次采集服务；每个文章来源再按 `config/sources.json` 的 4h/8h/12h/24h cadence 判断是否到期，模型全景默认按 `RADAR_MODEL_LANDSCAPE_CADENCE_HOURS=24` 刷新。手工执行 `npm run ingest` 会忽略两类 cadence，立即扫描全部启用来源并刷新模型全景。
 
 来源按 `primary → catalog fallbacks → operator relay` 严格串行尝试。内置备用端点只使用同一组织的官方入口或同一社区自己的域名：Claude Code 与 Hugging Face 使用其官方 GitHub Atom，Google Antigravity 使用 Google Developers Blog 搜索入口，V2EX 使用 `global.v2ex.com`。Bluesky 的 `searchPosts` 在 `public.api` host 上实测返回 403，Reddit 也没有等价官方镜像，因此两者不会登记已知不可用或不可控的公共备用入口，需要时由 operator relay 承接。
 

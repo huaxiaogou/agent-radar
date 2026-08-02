@@ -38,6 +38,17 @@ function normalizedRunAnalysisMode(status: RadarSnapshot["status"]): NonNullable
     : "none";
 }
 
+function normalizedModelLandscape(snapshot: Partial<RadarSnapshot>): RadarSnapshot["modelLandscape"] {
+  const landscape = snapshot.modelLandscape;
+  if (!landscape || !Array.isArray(landscape.models)) return seedRadarSnapshot.modelLandscape;
+  const lastSuccess = landscape.lastSuccessAt ? new Date(landscape.lastSuccessAt).getTime() : 0;
+  return {
+    ...landscape,
+    itemCount: Number(landscape.itemCount || landscape.models.length),
+    stale: !lastSuccess || Date.now() - lastSuccess > 48 * 60 * 60 * 1000,
+  };
+}
+
 function unavailableRadarSnapshot(runStatus: RadarSnapshot["status"]["runStatus"]): RadarSnapshot {
   return {
     ...seedRadarSnapshot,
@@ -86,6 +97,7 @@ export async function getRadarSnapshot(): Promise<RadarSnapshot> {
       digests: parsed.digests || [],
       modelPulses: parsed.modelPulses || [],
       candidateConcepts: parsed.candidateConcepts || [],
+      modelLandscape: normalizedModelLandscape(parsed),
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return unavailableRadarSnapshot("never");

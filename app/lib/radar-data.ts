@@ -85,6 +85,36 @@ export type ModelPulse = {
   sources: Array<SignalSource & { layer: SourceLayer }>;
 };
 
+export type ModelLandscapePoint = {
+  id: string;
+  slug: string;
+  name: string;
+  shortName: string;
+  providerName: string;
+  providerSlug: string;
+  providerColor: string | null;
+  codingIndex: number;
+  intelligenceIndex: number;
+  costPerTask: number;
+  isReasoning: boolean;
+  isOpenWeights: boolean;
+  releaseDate: string | null;
+  contextWindowTokens: number | null;
+  href: string;
+};
+
+export type ModelLandscape = {
+  sourceName: string;
+  sourceUrl: string;
+  methodologyUrl: string;
+  lastAttemptAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  itemCount: number;
+  stale: boolean;
+  models: ModelLandscapePoint[];
+};
+
 export type RadarDigest = {
   period: string;
   title: string;
@@ -151,6 +181,7 @@ export type RadarSnapshot = {
   playbooks: Array<{ title: string; description: string; steps: number; maturity: string }>;
   digests: RadarDigest[];
   modelPulses: ModelPulse[];
+  modelLandscape: ModelLandscape;
 };
 
 export const signals: Signal[] = [
@@ -420,4 +451,15 @@ export const seedRadarSnapshot: RadarSnapshot = {
   playbooks,
   digests,
   modelPulses: [],
+  modelLandscape: {
+    sourceName: "Artificial Analysis",
+    sourceUrl: "https://artificialanalysis.ai/models",
+    methodologyUrl: "https://artificialanalysis.ai/articles/artificial-analysis-intelligence-index-v4-1/",
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastError: null,
+    itemCount: 0,
+    stale: true,
+    models: [],
+  },
 };

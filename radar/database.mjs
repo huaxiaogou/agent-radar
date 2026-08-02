@@ -121,6 +121,18 @@ export function openDatabase() {
       FOREIGN KEY(source_id) REFERENCES source_health(source_id)
     );
 
+    CREATE TABLE IF NOT EXISTS model_landscape (
+      id INTEGER PRIMARY KEY CHECK(id = 1),
+      source_name TEXT NOT NULL,
+      source_url TEXT NOT NULL,
+      methodology_url TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '[]',
+      last_attempt_at TEXT,
+      last_success_at TEXT,
+      last_error TEXT,
+      item_count INTEGER NOT NULL DEFAULT 0
+    );
+
     CREATE INDEX IF NOT EXISTS articles_published_idx ON articles(COALESCE(published_at, discovered_at) DESC);
     CREATE INDEX IF NOT EXISTS articles_signal_idx ON articles(signal_slug);
     CREATE INDEX IF NOT EXISTS articles_concept_idx ON articles(concept_slug);
@@ -139,6 +151,12 @@ export function openDatabase() {
   ensureColumn(database, "articles", "event_key", "TEXT");
   ensureColumn(database, "articles", "candidate_concept", "TEXT NOT NULL DEFAULT ''");
   migrateRunConfiguredProvider(database);
+  database.prepare(`
+    INSERT OR IGNORE INTO model_landscape (
+      id, source_name, source_url, methodology_url, payload_json, item_count
+    ) VALUES (1, 'Artificial Analysis', 'https://artificialanalysis.ai/models',
+      'https://artificialanalysis.ai/articles/artificial-analysis-intelligence-index-v4-1/', '[]', 0)
+  `).run();
   database.exec("CREATE INDEX IF NOT EXISTS articles_event_idx ON articles(concept_slug, event_key)");
   return database;
 }
@@ -461,4 +479,47 @@ export function getLatestRun(database) {
 export function getArticleCount(database) {
   const row = database.prepare("SELECT COUNT(*) AS count FROM articles WHERE publish_decision = 'publish'").get();
   return Number(row?.count || 0);
+}
+
+export function getModelLandscapeState(database) {
+  const row = database.prepare("SELECT * FROM model_landscape WHERE id = 1").get();
+  let models = [];
+  try {
+    const parsed = JSON.parse(row?.payload_json || "[]");
+    if (Array.isArray(parsed)) models = parsed;
+  } catch {}
+  return {
+    sourceName: row?.source_name || "Artificial Analysis",
+    sourceUrl: row?.source_url || "https://artificialanalysis.ai/models",
+    methodologyUrl: row?.methodology_url || "https://artificialanalysis.ai/articles/artificial-analysis-intelligence-index-v4-1/",
+    lastAttemptAt: row?.last_attempt_at || null,
+    lastSuccessAt: row?.last_success_at || null,
+    lastError: row?.last_error || null,
+    itemCount: Number(row?.item_count || models.length),
+    models,
+  };
+}
+
+export function replaceModelLandscape(database, landscape) {
+  const payload = JSON.stringify(landscape.models);
+  database.prepare(`
+    UPDATE model_landscape SET
+      source_name = ?, source_url = ?, methodology_url = ?, payload_json = ?,
+      last_attempt_at = ?, last_success_at = ?, last_error = NULL, item_count = ?
+    WHERE id = 1
+  `).run(
+    landscape.sourceName,
+    landscape.sourceUrl,
+    landscape.methodologyUrl,
+    payload,
+    landscape.attemptedAt,
+    landscape.attemptedAt,
+    landscape.models.length,
+  );
+}
+
+export function markModelLandscapeFailure(database, { attemptedAt, error }) {
+  database.prepare(`
+    UPDATE model_landscape SET last_attempt_at = ?, last_error = ? WHERE id = 1
+  `).run(attemptedAt, error || "未知错误");
 }

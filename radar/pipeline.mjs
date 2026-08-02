@@ -4,16 +4,24 @@ import {
   articleExists,
   beginRun,
   finishRun,
+  getModelLandscapeState,
   getRecentClusterCandidates,
   getSourceHealth,
   insertArticle,
   openDatabase,
+  markModelLandscapeFailure,
+  replaceModelLandscape,
   retireWatchedArticle,
   updateSourceHealth,
   upsertSourceCatalog,
 } from "./database.mjs";
 import { loadSourceCatalog } from "./catalog.mjs";
 import { buildSnapshot, writeSnapshotAtomic } from "./snapshot.mjs";
+import {
+  discoverModelLandscape,
+  isModelLandscapeDue,
+  MODEL_LANDSCAPE_SOURCE,
+} from "./model-landscape.mjs";
 
 async function mapLimit(values, limit, mapper) {
   const results = new Array(values.length);
@@ -112,7 +120,12 @@ export function isSourceDue(source, { trigger = "manual", lastAttemptAt = null, 
   return nowTime - lastAttemptTime >= Number(match[1]) * 3_600_000;
 }
 
-export async function runIngestion({ trigger = "manual", logger = console, fetchOptions = {} } = {}) {
+export async function runIngestion({
+  trigger = "manual",
+  logger = console,
+  fetchOptions = {},
+  modelLandscapeFetcher = discoverModelLandscape,
+} = {}) {
   const sources = await loadSourceCatalog();
   for (const source of sources) isSourceDue(source, { trigger: "manual" });
   const analysisProvider = resolveAnalysisProvider();
@@ -127,6 +140,17 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
   }));
   const cadenceSkippedSources = sources.length - dueSources.length;
   const runId = beginRun(database, trigger, startedAt, analysisProvider);
+  const modelLandscapeState = getModelLandscapeState(database);
+  const modelLandscapeDue = isModelLandscapeDue({
+    trigger,
+    lastSuccessAt: modelLandscapeState.lastSuccessAt,
+    now: startedAt,
+  });
+  const modelLandscapePromise = modelLandscapeDue
+    ? modelLandscapeFetcher(fetchOptions)
+      .then((models) => ({ ok: true, models }))
+      .catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
+    : Promise.resolve({ ok: true, skipped: true, models: modelLandscapeState.models });
   let runFinished = false;
   let persistedResult = null;
 
@@ -299,9 +323,31 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
       });
     }
 
-    let status = dueSources.length > 0 && failedSources === dueSources.length
+    const modelLandscapeResult = await modelLandscapePromise;
+    let modelLandscapeErrorCount = 0;
+    if (modelLandscapeResult.skipped) {
+      logger.info?.(`[models:artificial-analysis] cadence-skipped items=${modelLandscapeState.itemCount}`);
+    } else if (modelLandscapeResult.ok) {
+      replaceModelLandscape(database, {
+        sourceName: MODEL_LANDSCAPE_SOURCE.name,
+        sourceUrl: MODEL_LANDSCAPE_SOURCE.url,
+        methodologyUrl: MODEL_LANDSCAPE_SOURCE.methodologyUrl,
+        attemptedAt: new Date().toISOString(),
+        models: modelLandscapeResult.models,
+      });
+      logger.info?.(`[models:artificial-analysis] discovered=${modelLandscapeResult.models.length}`);
+    } else {
+      modelLandscapeErrorCount = 1;
+      markModelLandscapeFailure(database, {
+        attemptedAt: new Date().toISOString(),
+        error: modelLandscapeResult.error,
+      });
+      logger.error?.(`[models:artificial-analysis] ${modelLandscapeResult.error}`);
+    }
+
+    let status = dueSources.length > 0 && failedSources === dueSources.length && !modelLandscapeResult.ok
       ? "failed"
-      : failedSources || degradedSourceCount || analysisFallbackCount ? "partial" : "success";
+      : failedSources || degradedSourceCount || analysisFallbackCount || modelLandscapeErrorCount ? "partial" : "success";
     const actualAnalysisModes = new Set(analyzed.map(({ analysis }) => analysis.analysisMode).filter(Boolean));
     const runAnalysisMode = actualAnalysisModes.size > 1
       ? "mixed"
@@ -316,6 +362,11 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
       retiredCount ? `${retiredCount} retired candidates` : null,
       analysisRepairCount ? `${analysisRepairCount} AI repairs` : null,
       analysisFallbackCount ? `${analysisFallbackCount} AI fallbacks` : null,
+      modelLandscapeResult.skipped
+        ? `model landscape cadence-skipped (${modelLandscapeState.itemCount} retained)`
+        : modelLandscapeResult.ok
+          ? `${modelLandscapeResult.models.length} model landscape points refreshed`
+          : `model landscape retained after failure: ${modelLandscapeResult.error}`,
     ].filter(Boolean).join("; ");
     const result = {
       finishedAt: new Date().toISOString(),
@@ -325,7 +376,7 @@ export async function runIngestion({ trigger = "manual", logger = console, fetch
       watchedCount,
       retiredCount,
       skippedCount,
-      errorCount: failedSources + degradedSourceCount + analysisFallbackCount,
+      errorCount: failedSources + degradedSourceCount + analysisFallbackCount + modelLandscapeErrorCount,
       degradedSourceCount,
       analysisRepairCount,
       configuredProvider: analysisProvider,

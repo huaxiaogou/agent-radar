@@ -432,3 +432,40 @@
 - Edge cases found: 11; degraded semantics, nested network and DNS codes, relay-relative links, bounded endpoint overrides, relay template validation, multi-row stale-run recovery, search-page self-links, empty successful responses and stale degraded health are covered.
 - Questions awaiting review: 1 production-network validation item.
 - Next session should read this section, `radar/fetch.mjs`, `radar/catalog.mjs`, `radar/pipeline.mjs` and `scripts/task-lock.mjs` before changing source transport or run lifecycle.
+
+## Dynamic model landscape session
+
+### Confirmed product decisions
+
+- The supplied chart is a visual-density and interaction reference, not a data fixture. No model name, score, price or point position is copied from the screenshot.
+- `/models` now separates a scheduled independent-benchmark landscape from the eight-model editorial comparison and the 7/30-day discussion pulse. These clocks and evidence contracts remain explicit on the page.
+- The systemd timer still wakes every four hours. The model landscape has its own 24-hour success cadence, while a manual `npm run ingest` always refreshes it immediately.
+
+### Deviations
+
+- An earlier session deliberately kept every capability field editorial and static. That boundary remains true for the eight-model exact comparison, but it no longer applies to the new market-wide landscape: Coding Index, Intelligence Index and benchmark cost per task now refresh from Artificial Analysis as structured external data.
+- The reference image contains provider-wide connecting lines. Connecting every model from one provider would imply a false evolution path, so the implementation only connects variants sharing the same normalized provider and short model family.
+- Rendering every model label at once would make the chart unreadable. All points are rendered and keyboard reachable, while deterministic collision placement labels up to 92 high-scoring candidates when space allows; an expandable exact table preserves every model and value.
+
+### Discovered edge cases
+
+- The public page exposes more than one encrypted manifest descriptor. The loader tries descriptors in reverse order and accepts only the decrypted object containing a `models` array.
+- The manifest path and key rotate. The page is fetched on every due refresh; only same-origin `/data/<hex>.txt` paths and 256-bit hexadecimal keys are accepted.
+- HTTP success does not prove schema stability. Missing benchmark fields, non-positive cost, deprecated rows and duplicate IDs are filtered, then a configurable minimum count gate rejects implausibly small results before SQLite replacement.
+- A model-source failure must not blank a valid public chart. Failure updates only `last_attempt_at` and `last_error`; the previous payload and `last_success_at` remain unchanged and the run is marked partial.
+- Encrypted manifests are binary. The SSRF-safe fetch path now has a bounded byte mode while preserving HTTPS-only target validation, redirect validation, DNS pinning and the existing 5 MiB transport cap; decompression has a separate 20 MiB output cap.
+- Provider color alone is inaccessible. Point shape distinguishes open weights and reasoning/non-reasoning forms, every point has a complete accessible label and native title, and the exact table exposes the same values without SVG interpretation.
+- On 375 px screens the full-density chart must remain legible instead of shrinking labels. The page keeps a 1320 px plot in an explicit, keyboard-focusable horizontal scroll region and shows a visible scroll cue without increasing root document width.
+- Old snapshots do not contain `modelLandscape`. The runtime reader normalizes them to an explicit waiting state instead of rejecting the otherwise valid article snapshot.
+
+### Questions for review
+
+- Artificial Analysis is an independent benchmark dependency, not a provider fact source. If its public manifest contract changes permanently, a second benchmark adapter should be added rather than weakening the count/schema gate.
+
+### Session summary
+
+- Deviations count: 3.
+- Most likely revisit: add a second independent structured benchmark source and a field-level disagreement view if the product later needs cross-benchmark comparison.
+- Edge cases found: 8; rotating manifests, multi-manifest selection, schema drift, fail-safe retention, bounded binary transport, color-only encoding, mobile density and old-snapshot compatibility are handled.
+- Questions awaiting review: 1 external-source durability item.
+- Next session should read this section, `radar/model-landscape.mjs`, `radar/database.mjs`, `radar/pipeline.mjs` and `app/models/page.tsx` before changing dynamic model metrics or scheduling.
