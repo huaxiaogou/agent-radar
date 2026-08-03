@@ -857,14 +857,18 @@ export function applyConceptKnowledgeRevision(database, rawPayload, {
     citations,
     relations: input.relations,
   };
-  const publishCurrentPayload = projectMergedPayloadToPublishCurrent(database, authoritativePayload);
+  const previous = existingRow ? recoverStoredPayload(database, existingRow).payload : null;
+  const existingWasFormal = Boolean(existingRow && isFormalConceptStage(existingRow.stage));
+  const projectedPublishCurrent = projectMergedPayloadToPublishCurrent(database, authoritativePayload);
+  const publishCurrentPayload = existingWasFormal
+    ? preserveFormalLastGoodFields(projectedPublishCurrent, previous)
+    : projectedPublishCurrent;
   const publicationQuality = formalPublicationQuality({
     concept: publishCurrentPayload.concept,
     claims: publishCurrentPayload.claims,
     evidence: publishCurrentPayload.evidence,
     citations: publishCurrentPayload.citations,
   });
-  const previous = existingRow ? recoverStoredPayload(database, existingRow).payload : null;
   const analysisTime = isoValue(analyzedAt);
   const evaluatedLifecycle = evaluateConceptLifecycle({
     currentStage: existingRow?.stage || input.concept.stage,
@@ -878,14 +882,13 @@ export function applyConceptKnowledgeRevision(database, rawPayload, {
     effectiveEvidenceDecisions: lifecycleEvidenceDecisions || ["publish", "watch"],
     currentStageChangedAt: lifecycleStageChangedAt,
   });
-  let lifecycle = input.identityDecision?.action === "needs-review"
+  let lifecycle = input.identityDecision?.action === "needs-review" && !existingWasFormal
     ? { ...evaluatedLifecycle, stage: "candidate" }
     : evaluatedLifecycle;
   const retiresUnsupportedConcept = canReadRetiredEvidenceForAudit
     && authoritativeEvidence.length > 0
     && authoritativeEvidence.every((item) => !["publish", "watch"].includes(item.publishDecision));
   if (retiresUnsupportedConcept) lifecycle = { ...evaluatedLifecycle, stage: "archived" };
-  const existingWasFormal = Boolean(existingRow && isFormalConceptStage(existingRow.stage));
   const isAllowedLifecycleRetirement = allowLifecycleRetirement && lifecycle.stage === "archived";
   if (existingWasFormal && !isAllowedLifecycleRetirement
       && (!isFormalConceptStage(lifecycle.stage) || !publicationQuality.publicReady)) {
@@ -898,14 +901,19 @@ export function applyConceptKnowledgeRevision(database, rawPayload, {
   if (input.relations.length > 0 && !isFormalConceptStage(lifecycle.stage) && !isAllowedLifecycleRetirement) {
     throw new Error(`关系 sourceSlug 尚未成为正式概念：${input.concept.slug}`);
   }
-  const aliases = unique([input.concept.canonicalName, input.concept.slug, ...input.concept.aliases]);
   const formalCurrentPayload = isFormalConceptStage(lifecycle.stage)
     ? publishCurrentPayload
     : authoritativePayload;
+  const currentConceptInput = formalCurrentPayload.concept;
+  const aliases = unique([
+    currentConceptInput.canonicalName,
+    currentConceptInput.slug,
+    ...(currentConceptInput.aliases || []),
+  ]);
   const concept = {
-    ...conceptDomainFields(input.concept),
-    canonicalName: input.concept.canonicalName.trim(),
-    name: input.concept.canonicalName.trim(),
+    ...conceptDomainFields(currentConceptInput),
+    canonicalName: currentConceptInput.canonicalName.trim(),
+    name: currentConceptInput.canonicalName.trim(),
     aliases,
     stage: lifecycle.stage,
     heat: lifecycle.heat,
@@ -914,7 +922,7 @@ export function applyConceptKnowledgeRevision(database, rawPayload, {
     independentSourceGroups: lifecycle.independentGroupCount,
     createdAt: previous?.concept?.createdAt || analysisTime,
     lastMeaningfulChange: preserveLastMeaningfulChange
-      ? (previous?.concept?.lastMeaningfulChange || input.concept.lastMeaningfulChange)
+      ? (previous?.concept?.lastMeaningfulChange || currentConceptInput.lastMeaningfulChange)
       : analysisTime,
   };
   let nextBase = {
@@ -1495,6 +1503,33 @@ function projectMergedPayloadToPublishCurrent(database, payload) {
   };
 }
 
+function preserveFormalLastGoodFields(projected, previous) {
+  if (!previous?.concept) return projected;
+  const publishUrls = new Set((projected.evidence || []).map((item) => item.url));
+  const citationByField = new Map((projected.citations || []).map((item) => [item.field, {
+    ...item,
+    evidenceUrls: unique((item.evidenceUrls || []).filter((url) => publishUrls.has(url))),
+  }]));
+  const previousCitationByField = new Map((previous.citations || []).map((item) => [item.field, item]));
+  const concept = structuredClone(projected.concept);
+  for (const field of [...CITABLE_TEXT_FIELDS, ...CITABLE_ARRAY_FIELDS]) {
+    if (citationByField.get(field)?.evidenceUrls?.length) continue;
+    if (!nonEmptyKnowledgeField(projected.concept[field])) continue;
+    const previousValue = previous.concept[field];
+    if (!nonEmptyKnowledgeField(previousValue)) continue;
+    const evidenceUrls = unique((previousCitationByField.get(field)?.evidenceUrls || [])
+      .filter((url) => publishUrls.has(url)));
+    if (evidenceUrls.length === 0) continue;
+    concept[field] = structuredClone(previousValue);
+    citationByField.set(field, { field, evidenceUrls });
+  }
+  return {
+    ...projected,
+    concept,
+    citations: [...citationByField.values()].filter((item) => item.evidenceUrls.length > 0),
+  };
+}
+
 function rewriteInboundRelations(database, {
   fromSlug,
   intoSlug,
@@ -1631,16 +1666,51 @@ function mergeKnowledgePayload(previousKnowledge, incoming) {
     relations: previousKnowledge.relations || previousKnowledge.concept.relations || [],
   } : null;
   if (!previous) return incoming;
-  const mergedConcept = {
-    ...conceptDomainFields(previous.concept),
-    ...conceptDomainFields(incoming.concept),
-    aliases: unique([...(previous.concept.aliases || []), ...(incoming.concept.aliases || [])]),
-    controversies: unique([...(previous.concept.controversies || []), ...(incoming.concept.controversies || [])]),
-  };
+  const extractionDelta = incoming?.analysisMetadata?.extractionDelta;
+  const compactDelta = extractionDelta?.compact === true ? extractionDelta : null;
+  const previousConcept = conceptDomainFields(previous.concept);
+  const incomingConcept = conceptDomainFields(incoming.concept);
+  let mergedConcept;
+  if (compactDelta) {
+    const patchedFields = new Set(compactDelta.patchedFields || []);
+    mergedConcept = {
+      ...previousConcept,
+      slug: previousConcept.slug || incomingConcept.slug,
+      canonicalName: previousConcept.canonicalName || incomingConcept.canonicalName,
+      aliases: unique([...(previousConcept.aliases || []), ...(incomingConcept.aliases || [])]),
+      themes: unique([...(previousConcept.themes || []), ...(incomingConcept.themes || [])]),
+      lastMeaningfulChange: incomingConcept.lastMeaningfulChange || previousConcept.lastMeaningfulChange,
+    };
+    for (const field of patchedFields) {
+      if (["aliases", "slug", "canonicalName", "themes", "stage", "heat", "maturity"].includes(field)) continue;
+      if (Object.hasOwn(incomingConcept, field)) mergedConcept[field] = structuredClone(incomingConcept[field]);
+    }
+  } else {
+    mergedConcept = {
+      ...previousConcept,
+      ...incomingConcept,
+      aliases: unique([...(previous.concept.aliases || []), ...(incoming.concept.aliases || [])]),
+      controversies: unique([...(previous.concept.controversies || []), ...(incoming.concept.controversies || [])]),
+    };
+  }
   const evidenceByUrl = new Map((previous.evidence || []).map((item) => [item.url, item]));
-  for (const evidence of incoming.evidence || []) evidenceByUrl.set(evidence.url, evidence);
+  const incomingEvidence = compactDelta
+    ? (incoming.evidence || []).filter((item) => item.url === compactDelta.evidenceUrl)
+    : (incoming.evidence || []);
+  for (const evidence of incomingEvidence) {
+    const existing = evidenceByUrl.get(evidence.url);
+    evidenceByUrl.set(evidence.url, {
+      ...(existing || {}),
+      ...evidence,
+      supports: unique([...(existing?.supports || []), ...(evidence.supports || [])]),
+    });
+  }
   const claimsByKey = new Map((previous.claims || []).map((item) => [item.key, { ...item, evidenceUrls: undefined }]));
-  for (const claim of incoming.claims || []) {
+  const deltaClaimKeys = compactDelta ? new Set(compactDelta.claimKeys || []) : null;
+  const incomingClaims = deltaClaimKeys
+    ? (incoming.claims || []).filter((item) => deltaClaimKeys.has(item.key))
+    : (incoming.claims || []);
+  for (const claim of incomingClaims) {
     const existing = claimsByKey.get(claim.key);
     const normalizedText = (value) => String(value || "").trim().replace(/\s+/gu, " ");
     if (existing && (
@@ -1652,10 +1722,16 @@ function mergeKnowledgePayload(previousKnowledge, incoming) {
     claimsByKey.set(claim.key, claim);
   }
   const relationByKey = new Map((previous.relations || []).map((item) => [`${item.type}:${item.targetSlug}`, item]));
-  for (const relation of incoming.relations || []) relationByKey.set(`${relation.type}:${relation.targetSlug}`, relation);
+  if (!compactDelta) {
+    for (const relation of incoming.relations || []) relationByKey.set(`${relation.type}:${relation.targetSlug}`, relation);
+  }
   const previousCitationByField = new Map((previous.citations || []).map((item) => [item.field, item]));
   const citationByField = new Map();
-  for (const citation of incoming.citations || []) {
+  const compactPatchedFields = compactDelta ? new Set(compactDelta.patchedFields || []) : null;
+  const incomingCitations = compactPatchedFields
+    ? (incoming.citations || []).filter((item) => compactPatchedFields.has(item.field))
+    : (incoming.citations || []);
+  for (const citation of incomingCitations) {
     const existing = previousCitationByField.get(citation.field);
     const fieldChanged = canonicalJson(previous.concept?.[citation.field]) !== canonicalJson(mergedConcept[citation.field]);
     citationByField.set(citation.field, {

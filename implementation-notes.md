@@ -778,3 +778,29 @@
 - Next.js production build and TypeScript: passed.
 - ESLint, syntax checks and `git diff --check`: passed.
 - Production acceptance still requires deploying analyzer-v3, stopping or letting any analyzer-v2 foreground worker finish, rerunning the resumable concept backfill, passing `concepts:check`, and manually sampling the resulting candidates and formal dossiers.
+
+## 2026-08-04 · Concept tail-backlog convergence repair
+
+### Production evidence and risk boundary
+
+- The production backlog converged from hundreds of articles to 12 repeat failures. The remaining failures were dominated by `evidence-contract` and `chinese-editorial`, so the repair targets compact-response normalization and revision merging rather than provider connectivity, source discovery or database leasing.
+- Formal publication gates remain strict: no fabricated evidence URL, English-led public knowledge, unsupported formal field or non-publish citation is accepted. Historical revisions remain append-only and no failed row is deleted.
+
+### Correctness repairs
+
+- Compact DeepSeek output is now salvaged field by field. Invalid English prose, list items and claims are discarded while valid Chinese evidence survives; an invalid identity explanation is conservatively downgraded to `needs-review`, and a missing Chinese daily delta is deterministically derived only from a valid Chinese atomic claim.
+- A completely unusable compact result receives the configured correction retry. If every attempt still contains no valid Chinese substantive field and no valid claim, the article completes with zero extracted concepts instead of fabricating knowledge or permanently blocking the resumable backlog.
+- Compact analysis now carries a non-public extraction-delta contract. Revision merging applies only the fields, claims, citations and current evidence URL extracted from this article, preventing a provider-carried historical dossier from overwriting authoritative claim bindings or relations.
+- Watch evidence remains in the append-only revision audit but cannot replace a formal concept's published last-good field without a publish-eligible citation. An identity uncertainty on a new watch item also cannot silently demote an already formal concept.
+
+### Discovered edge case
+
+- Last-good preservation must not restore a field that the publish projection intentionally cleared. It therefore restores only a non-empty projected value that lacks publish support; a deliberate, valid empty update such as clearing resolved controversies remains authoritative.
+
+### Final verification summary
+
+- Focused compact/backfill/lifecycle suite: 81/81.
+- Full unit/integration suite: 284/284.
+- Server-rendered route contracts: 46/46.
+- ESLint, TypeScript, Next.js production build and `git diff --check`: passed.
+- Production acceptance requires deploying this revision, rerunning `concepts:backfill` until no worker remains, and confirming `pendingArticleCount=0`, `failedArticleCount=0`, healthy recovery status and readable formal/candidate dossiers.

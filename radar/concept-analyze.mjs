@@ -695,8 +695,12 @@ function compactExtractionPayload(raw, {
   let action = IDENTITY_ACTIONS.includes(rawDecision.action) ? rawDecision.action : "needs-review";
   let canonicalSlug = String(rawDecision.canonicalSlug || proposedSlug).trim();
   const confidence = Math.max(0, Math.min(1, Number(rawDecision.confidence) || 0));
-  const reason = String(rawDecision.reason || "").trim();
-  if (!chineseLed(reason)) throw new Error("identityDecision.reason 必须是中文主导内容");
+  let reason = String(rawDecision.reason || "").trim();
+  if (!chineseLed(reason)) {
+    action = "needs-review";
+    canonicalSlug = proposedSlug;
+    reason = "模型身份说明未通过中文门禁，已保守降级为需要人工复核的候选概念。";
+  }
   const comparedSlugs = uniqueStrings(rawDecision.comparedSlugs).filter((slug) => known.has(slug));
   if (action === "reuse-existing" && (!known.has(canonicalSlug) || confidence < 0.8)) action = "needs-review";
   if (action === "create-new" && confidence < 0.8) action = "needs-review";
@@ -710,34 +714,32 @@ function compactExtractionPayload(raw, {
   const patch = {};
   for (const field of CHINESE_TEXT_FIELDS) {
     const text = typeof fields[field] === "string" ? fields[field].trim() : "";
-    if (text && !chineseLed(text)) throw new Error(`${field} 必须是中文主导内容`);
-    patch[field] = text;
+    patch[field] = text && chineseLed(text) ? text : "";
   }
   for (const field of CHINESE_ARRAY_FIELDS) {
-    const items = uniqueStrings(fields[field]);
-    for (const item of items) if (!chineseLed(item)) throw new Error(`${field} 的每一项必须是中文主导内容`);
-    patch[field] = items;
+    patch[field] = uniqueStrings(fields[field]).filter(chineseLed);
   }
-  if (!chineseLed(patch.dailyDelta)) throw new Error("dailyDelta 必须说明本篇证据带来的中文增量");
-  const hasSubstantiveField = COMPACT_SUBSTANTIVE_FIELDS.some((field) => (
-    Array.isArray(patch[field]) ? patch[field].length > 0 : Boolean(patch[field])
-  ));
-  if (!hasSubstantiveField) throw new Error("概念证据提取至少需要一个 dailyDelta 之外的实质知识字段");
 
   const extractedClaims = (Array.isArray(raw.claims) ? raw.claims : [])
     .filter((claim) => claim && typeof claim === "object")
     .slice(0, 8)
-    .map((claim, index) => {
+    .flatMap((claim, index) => {
       const text = String(claim.text || "").trim();
-      if (!chineseLed(text)) throw new Error(`claims.text 必须是中文主导内容：${index + 1}`);
-      return {
+      if (!chineseLed(text)) return [];
+      return [{
         key: compactClaimKey(claim.key, article.url, text, index),
         text,
         kind: CLAIM_KINDS.includes(claim.kind) ? claim.kind : "mechanism",
         confidence: Math.max(0, Math.min(1, Number(claim.confidence) || 0)),
-      };
+      }];
     });
-  if (extractedClaims.length === 0) throw new Error("概念证据提取必须包含至少一条中文原子主张");
+  if (!patch.dailyDelta && extractedClaims.length > 0) {
+    patch.dailyDelta = `本篇证据新增主张：${extractedClaims[0].text}`.slice(0, 800);
+  }
+  const hasSubstantiveField = COMPACT_SUBSTANTIVE_FIELDS.some((field) => (
+    Array.isArray(patch[field]) ? patch[field].length > 0 : Boolean(patch[field])
+  ));
+  if (!hasSubstantiveField || extractedClaims.length === 0) return null;
 
   const catalog = existingKnowledgeItems([
     ...existingKnowledgeItems(existingKnowledge),
@@ -804,7 +806,7 @@ function compactExtractionPayload(raw, {
     }
   }
 
-  return {
+  const payload = {
     identityDecision: {
       action,
       canonicalSlug,
@@ -817,6 +819,15 @@ function compactExtractionPayload(raw, {
     evidence: [...evidenceByUrl.values()],
     citations: [...citationByField.values()],
     relations: base?.relations || [],
+  };
+  return {
+    payload,
+    extractionDelta: {
+      compact: true,
+      evidenceUrl: article.url,
+      patchedFields: [...patchedFields],
+      claimKeys: extractedClaims.map((claim) => claim.key),
+    },
   };
 }
 
@@ -1119,21 +1130,33 @@ export async function analyzeConceptKnowledgeArticle(article, {
       if (!compactMode && rawPayloads.some((value) => value && typeof value === "object" && Object.hasOwn(value, "fields"))) {
         throw new Error("概念知识响应不能混合紧凑证据与旧版完整对象");
       }
-      const normalizedPayloads = compactMode
-        ? rawPayloads.map((value) => compactExtractionPayload(value, {
+      let extractionDeltas = [];
+      let normalizedPayloads;
+      if (compactMode) {
+        const compactResults = rawPayloads.map((value) => compactExtractionPayload(value, {
           article: normalized,
           existingKnowledge: activeExistingKnowledge,
           existingKnowledgeCatalog,
           knownConceptSlugs,
           now,
-        }))
-        : rawPayloads.map((value) => normalizeProviderPayload(value, {
+        }));
+        const unusableCount = compactResults.filter((value) => value == null).length;
+        if (unusableCount > 0 && attempt < maxAttempts) {
+          throw new Error(`中文编辑与证据门禁未通过：${unusableCount} 个概念没有合格的中文实质字段或原子主张`);
+        }
+        const usable = compactResults.filter(Boolean);
+        if (usable.length === 0) return [];
+        normalizedPayloads = usable.map((value) => value.payload);
+        extractionDeltas = usable.map((value) => value.extractionDelta);
+      } else {
+        normalizedPayloads = rawPayloads.map((value) => normalizeProviderPayload(value, {
           article: normalized,
           existingKnowledge: activeExistingKnowledge,
           knownConceptSlugs,
           knownRelationTargetSlugs,
           now,
         }));
+      }
       const parsedPayloads = normalizedPayloads.map((value) => normalizeIdentityPayload(
         parseConceptKnowledgeAnalysis(value, {
           allowedEvidenceUrls: [...allowedEvidenceUrls],
@@ -1165,7 +1188,7 @@ export async function analyzeConceptKnowledgeArticle(article, {
         continue;
       }
       const slugs = new Set();
-      for (const parsed of parsedPayloads) {
+      for (const [index, parsed] of parsedPayloads.entries()) {
         if (slugs.has(parsed.concept.slug)) throw new Error(`同一文章重复输出概念：${parsed.concept.slug}`);
         slugs.add(parsed.concept.slug);
         const currentEvidence = parsed.evidence?.find((item) => item.url === normalized.url);
@@ -1174,7 +1197,13 @@ export async function analyzeConceptKnowledgeArticle(article, {
           throw new Error(`概念 ${parsed.concept.slug} 修改了当前证据的原标题`);
         }
         Object.defineProperty(parsed, "analysisMetadata", {
-          value: { provider, model, analyzedAt: now, attempt: requestCount },
+          value: {
+            provider,
+            model,
+            analyzedAt: now,
+            attempt: requestCount,
+            ...(extractionDeltas[index] ? { extractionDelta: extractionDeltas[index] } : {}),
+          },
           enumerable: false,
         });
       }

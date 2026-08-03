@@ -975,6 +975,165 @@ test("compact concept extraction locally assembles authoritative evidence, citat
   assert.equal(request.max_tokens, 8000, "紧凑提取不得继续使用 32K 的完整 dossier 输出预算");
 });
 
+test("compact extraction keeps valid Chinese evidence while repairing mixed-language provider drift", async () => {
+  const { analyzeConceptKnowledgeArticle } = await import("../radar/concept-analyze.mjs");
+  const sourceUrl = "https://vendor-alpha.example.com/engineering/mixed-language-repair";
+  const originalTitle = "Mixed-language evidence extraction";
+  const article = {
+    url: sourceUrl,
+    sourceId: SOURCES.vendorBlog.id,
+    sourceName: SOURCES.vendorBlog.name,
+    sourceClass: SOURCES.vendorBlog.class,
+    sourceLayer: SOURCES.vendorBlog.layer,
+    independentGroup: SOURCES.vendorBlog.independentGroup,
+    sourceLanguage: "en",
+    originalTitle,
+    originalExcerpt: "The executor persists a checkpoint before side effects.",
+    contentText: "The recovery path verifies the result after restoring the checkpoint.",
+    publishedAt: "2026-08-03T06:00:00.000Z",
+  };
+  const compact = {
+    identityDecision: {
+      action: "create-new",
+      canonicalSlug: "mixed-language-repair-loop",
+      confidence: 0.92,
+      reason: "This English identity explanation must be repaired locally.",
+      comparedSlugs: [],
+    },
+    concept: {
+      slug: "mixed-language-repair-loop",
+      canonicalName: "Mixed-language Repair Loop",
+      aliases: ["混合语言修复闭环"],
+      themes: ["agent-runtime"],
+    },
+    fields: {
+      definition: "This English field must not enter public knowledge.",
+      nonDefinition: "",
+      problem: "",
+      whyNow: "",
+      origin: "",
+      mechanism: "执行器在外部副作用前保存检查点，并在恢复后重新验证结果。",
+      architecture: "",
+      dailyDelta: "This English delta must be rebuilt from valid evidence.",
+      evolution: [],
+      designConstraints: ["检查点必须先于外部副作用提交。", "English list items must be discarded."],
+      implementationPatterns: [],
+      antiPatterns: [],
+      tradeoffs: [],
+      failureModes: [],
+      securityRisks: [],
+      operationalConcerns: [],
+      applicability: [],
+      nonApplicability: [],
+      controversies: [],
+    },
+    claims: [
+      {
+        key: "english-claim",
+        text: "An English claim must not become authoritative evidence.",
+        kind: "mechanism",
+        confidence: 0.9,
+      },
+      {
+        key: "checkpoint-before-side-effect",
+        text: "执行器必须在外部副作用之前提交可恢复检查点。",
+        kind: "mechanism",
+        confidence: 0.9,
+      },
+    ],
+  };
+  let requests = 0;
+  const analyzed = await analyzeConceptKnowledgeArticle(article, {
+    provider: "deepseek",
+    knownConcepts: [],
+    now: "2026-08-03T06:30:00.000Z",
+    maxAttempts: 1,
+    environment: {
+      DEEPSEEK_API_KEY: "mixed-language-repair-test-key",
+      RADAR_DEEPSEEK_CONCEPT_MODEL: "deepseek-compact-test",
+      RADAR_DEEPSEEK_CONCEPT_TIMEOUT_MS: "10000",
+    },
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response(JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ concepts: [compact] }) } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  assert.equal(requests, 1, "可机械修复的语言漂移不得额外消耗模型调用");
+  assert.equal(analyzed.length, 1);
+  const [payload] = analyzed;
+  assert.equal(payload.identityDecision.action, "needs-review", "英文身份说明只能降级为待复核，不能伪造确定性身份");
+  assert.match(payload.identityDecision.reason, /中文|人工|复核/u);
+  assert.equal(payload.concept.definition, "", "不合格英文知识字段必须被丢弃");
+  assert.match(payload.concept.mechanism, /检查点/u);
+  assert.deepEqual(payload.concept.designConstraints, ["检查点必须先于外部副作用提交。"]);
+  assert.equal(payload.claims.length, 1, "英文主张不得写入权威知识");
+  assert.match(payload.concept.dailyDelta, /执行器必须在外部副作用之前/u, "英文 dailyDelta 应从合格中文原子主张确定性重建");
+});
+
+test("compact extraction retries unusable editorial output before safely completing with zero concepts", async () => {
+  const { analyzeConceptKnowledgeArticle } = await import("../radar/concept-analyze.mjs");
+  const invalidCompact = {
+    identityDecision: {
+      action: "create-new",
+      canonicalSlug: "english-only-placeholder",
+      confidence: 0.9,
+      reason: "English-only identity reason.",
+      comparedSlugs: [],
+    },
+    concept: {
+      slug: "english-only-placeholder",
+      canonicalName: "English-only Placeholder",
+      aliases: [],
+      themes: ["agent-runtime"],
+    },
+    fields: Object.fromEntries([
+      "definition", "nonDefinition", "problem", "whyNow", "origin", "mechanism", "architecture", "dailyDelta",
+    ].map((field) => [field, "English-only generated content."]).concat([
+      "evolution", "designConstraints", "implementationPatterns", "antiPatterns", "tradeoffs", "failureModes",
+      "securityRisks", "operationalConcerns", "applicability", "nonApplicability", "controversies",
+    ].map((field) => [field, []]))),
+    claims: [{
+      key: "english-only-claim",
+      text: "English-only claims cannot become authoritative knowledge.",
+      kind: "mechanism",
+      confidence: 0.9,
+    }],
+  };
+  let requests = 0;
+  const analyzed = await analyzeConceptKnowledgeArticle({
+    url: "https://vendor-alpha.example.com/engineering/english-only-output",
+    sourceId: SOURCES.vendorBlog.id,
+    sourceName: SOURCES.vendorBlog.name,
+    sourceClass: SOURCES.vendorBlog.class,
+    sourceLayer: SOURCES.vendorBlog.layer,
+    independentGroup: SOURCES.vendorBlog.independentGroup,
+    originalTitle: "English-only provider output",
+    contentText: "The article is valid, but the provider repeatedly ignores the Chinese editorial contract.",
+    publishedAt: "2026-08-03T06:00:00.000Z",
+  }, {
+    provider: "deepseek",
+    knownConcepts: [],
+    maxAttempts: 2,
+    environment: {
+      DEEPSEEK_API_KEY: "english-only-output-test-key",
+      RADAR_DEEPSEEK_CONCEPT_MODEL: "deepseek-compact-test",
+      RADAR_DEEPSEEK_CONCEPT_TIMEOUT_MS: "10000",
+    },
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response(JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ concepts: [invalidCompact] }) } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  assert.equal(requests, 2, "完全不可用的输出应先获得一次纠正机会");
+  assert.deepEqual(analyzed, [], "多次仍无合格主张时应安全完成为空，不得制造概念或永久阻塞 backlog");
+});
+
 test("analyzer can mark an evidence-poor release article complete with zero fabricated concepts", async () => {
   const { analyzeConceptKnowledgeArticle } = await import("../radar/concept-analyze.mjs");
   const analyzed = await analyzeConceptKnowledgeArticle({
@@ -1272,6 +1431,111 @@ test("historical backfill is resumable and idempotent across batches", async () 
     assert.equal(rerun.skippedCount, articles.length);
     assert.equal(analyzerCalls, articles.length, "内容哈希未变化的历史文章不得重复调用 LLM");
     assert.equal(listConceptKnowledgeRevisions(database, "runtime-assurance-loop").length, revisionCount);
+  } finally {
+    database.close();
+  }
+});
+
+test("watch evidence completes backfill while preserving the formal concept last-good publication", async () => {
+  const {
+    applyConceptKnowledgeRevision,
+    getConceptKnowledge,
+    runConceptKnowledgeBackfill,
+  } = await knowledgeApi(
+    "applyConceptKnowledgeRevision",
+    "getConceptKnowledge",
+    "runConceptKnowledgeBackfill",
+  );
+  const database = await createDatabase();
+  try {
+    upsertSourceCatalog(database, [SOURCES.vendorBlog, SOURCES.practitioner, SOURCES.community]);
+    const officialUrl = insertEvidenceArticle(database, SOURCES.vendorBlog, {
+      suffix: "formal-last-good-official",
+      originalTitle: "Formal runtime assurance contract",
+    });
+    const practitionerUrl = insertEvidenceArticle(database, SOURCES.practitioner, {
+      suffix: "formal-last-good-practice",
+      originalTitle: "生产运行时保障实践",
+    });
+    const basePayload = fullKnowledgePayload({
+      evidence: [
+        evidenceFor(SOURCES.vendorBlog, officialUrl, "Formal runtime assurance contract"),
+        evidenceFor(SOURCES.practitioner, practitionerUrl, "生产运行时保障实践"),
+      ],
+      dailyDelta: "正式知识已经由公开官方证据与独立实践证据共同支撑。",
+    });
+    applyConceptKnowledgeRevision(database, basePayload, applyOptions());
+    const before = getConceptKnowledge(database, "runtime-assurance-loop").concept;
+    assert.notEqual(before.stage, "candidate");
+
+    const watchUrl = insertEvidenceArticle(database, SOURCES.community, {
+      suffix: "formal-last-good-watch",
+      originalTitle: "社区讨论新的恢复边界",
+      publishDecision: "watch",
+    });
+    const watchClaimKey = "watch-recovery-boundary";
+    const incoming = fullKnowledgePayload({
+      evidence: [
+        evidenceFor(SOURCES.vendorBlog, officialUrl, "Formal runtime assurance contract"),
+        evidenceFor(SOURCES.practitioner, practitionerUrl, "生产运行时保障实践"),
+        evidenceFor(SOURCES.community, watchUrl, "社区讨论新的恢复边界", {
+          supports: [watchClaimKey],
+          stance: "context",
+        }),
+      ],
+      dailyDelta: "候选社区材料提出了新的恢复边界，但尚未达到正式发布证据门槛。",
+    });
+    incoming.identityDecision = {
+      action: "reuse-existing",
+      canonicalSlug: "runtime-assurance-loop",
+      confidence: 0.94,
+      reason: "该材料讨论的是既有运行时保障闭环的新边界，定义和核心机制没有形成独立概念。",
+      comparedSlugs: ["runtime-assurance-loop"],
+    };
+    incoming.claims.push({
+      key: watchClaimKey,
+      text: "社区材料认为恢复流程还需要记录模型决策边界。",
+      kind: "boundary",
+      confidence: 0.62,
+    });
+    incoming.citations = incoming.citations.map((citation) => (
+      citation.field === "dailyDelta"
+        ? { field: "dailyDelta", evidenceUrls: [watchUrl] }
+        : citation
+    ));
+    Object.defineProperty(incoming, "analysisMetadata", {
+      value: {
+        provider: "deepseek",
+        model: "deepseek-compact-test",
+        extractionDelta: {
+          compact: true,
+          evidenceUrl: watchUrl,
+          patchedFields: ["dailyDelta"],
+          claimKeys: [watchClaimKey],
+        },
+      },
+      enumerable: false,
+    });
+
+    const result = await runConceptKnowledgeBackfill({
+      database,
+      articleUrls: [watchUrl],
+      batchSize: 1,
+      concurrency: 1,
+      analyzeArticle: async () => incoming,
+    });
+    assert.equal(result.processedCount, 1, "候选证据应进入审计历史，不能永久阻塞回填");
+    assert.equal(result.failedCount, 0);
+    const after = getConceptKnowledge(database, "runtime-assurance-loop").concept;
+    assert.equal(after.dailyDelta, before.dailyDelta, "没有 publish 引文的新措辞不得覆盖正式页面 last-good 字段");
+    const auditPayload = JSON.parse(database.prepare(`
+      SELECT payload_json
+      FROM concept_revisions
+      WHERE concept_slug = 'runtime-assurance-loop'
+      ORDER BY revision DESC
+      LIMIT 1
+    `).get().payload_json);
+    assert.ok(auditPayload.evidence.some((item) => item.url === watchUrl), "候选证据仍必须保留在修订审计载荷中");
   } finally {
     database.close();
   }
