@@ -1,5 +1,15 @@
+import { readFile } from "node:fs/promises";
 import { contentHash, enrichItem, discoverSourceItemsWithDiagnostics } from "./fetch.mjs";
 import { analyzeItem, chooseSignalSlug, resolveAnalysisProvider, scoreRelevance, shouldExploreCandidate } from "./analyze.mjs";
+import { createConceptKnowledgeAnalyzer } from "./concept-analyze.mjs";
+import {
+  CONCEPT_ANALYZER_VERSION,
+  CONCEPT_KNOWLEDGE_SCHEMA_VERSION,
+  conceptArticleInputContractHash,
+  listConceptKnowledge,
+  maintainConceptKnowledgeLifecycles,
+  runConceptKnowledgeBackfill,
+} from "./concept-knowledge.mjs";
 import {
   articleExists,
   beginRun,
@@ -22,6 +32,9 @@ import {
   isModelLandscapeDue,
   MODEL_LANDSCAPE_SOURCE,
 } from "./model-landscape.mjs";
+
+const bootstrapConceptsPromise = readFile(new URL("../config/concepts.json", import.meta.url), "utf8")
+  .then((value) => JSON.parse(value));
 
 async function mapLimit(values, limit, mapper) {
   const results = new Array(values.length);
@@ -48,6 +61,51 @@ function withinAgeLimit(value) {
   if (!value) return true;
   const maxDays = Number(process.env.RADAR_MAX_ITEM_AGE_DAYS || 120);
   return Date.now() - new Date(value).getTime() <= maxDays * 86_400_000;
+}
+
+function positiveInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function selectConceptRetryUrls(database, {
+  limit,
+  excludeUrls = [],
+  now = new Date().toISOString(),
+} = {}) {
+  const retryLimit = positiveInteger(limit, 4);
+  const excluded = new Set(excludeUrls);
+  return database.prepare(`
+    SELECT a.url, a.content_hash, a.content_roles_json,
+           b.content_hash AS backfill_content_hash,
+           b.input_contract_hash, b.knowledge_schema_version, b.analyzer_version, b.status,
+           lease.content_hash AS lease_content_hash, lease.lease_expires_at
+    FROM articles a
+    LEFT JOIN concept_backfill b ON b.article_url = a.url
+    LEFT JOIN concept_backfill_leases lease ON lease.article_url = a.url
+    WHERE a.publish_decision IN ('publish', 'watch')
+    ORDER BY
+      CASE
+        WHEN b.article_url IS NULL OR b.content_hash <> a.content_hash THEN 0
+        ELSE 1
+      END,
+      COALESCE(b.attempted_at, a.discovered_at),
+      a.url
+  `).all()
+    .filter((row) => {
+      if (excluded.has(row.url)) return false;
+      const completedCurrentContract = row.status === "completed"
+        && row.backfill_content_hash === row.content_hash
+        && row.input_contract_hash === conceptArticleInputContractHash(row)
+        && row.knowledge_schema_version === CONCEPT_KNOWLEDGE_SCHEMA_VERSION
+        && row.analyzer_version === CONCEPT_ANALYZER_VERSION;
+      if (completedCurrentContract) return false;
+      const leased = row.lease_content_hash === row.content_hash
+        && new Date(row.lease_expires_at || 0).getTime() > new Date(now).getTime();
+      return !leased;
+    })
+    .map((row) => row.url)
+    .slice(0, retryLimit);
 }
 
 export function selectFairly(candidates, limit) {
@@ -216,6 +274,7 @@ export async function runIngestion({
           sourceFamily: result.source.family,
           sourceLanguage: result.source.language,
           sourceFocus: result.source.focus,
+          contentRoles: result.source.contentRoles || [],
           alwaysRelevant: result.source.alwaysRelevant === true,
           engagementCount: Number(rawItem.engagementCount || 0),
         });
@@ -230,6 +289,16 @@ export async function runIngestion({
       Number(process.env.RADAR_FETCH_CONCURRENCY || 4),
       (item) => enrichItem(item, fetchOptions),
     );
+    const enrichmentDegradedItems = enrichedItems.filter((item) => item.enrichmentStatus === "degraded");
+    const enrichmentDiagnosticsBySource = new Map();
+    for (const item of enrichmentDegradedItems) {
+      const diagnostic = `[${item.enrichmentError?.code || "FETCH_ERROR"}] ${item.enrichmentError?.message || "详情正文抓取失败；已使用 excerpt-only 内容"}`;
+      const diagnostics = enrichmentDiagnosticsBySource.get(item.sourceId) || [];
+      if (!diagnostics.includes(diagnostic)) diagnostics.push(diagnostic);
+      enrichmentDiagnosticsBySource.set(item.sourceId, diagnostics);
+      logger.warn?.(`[source:${item.sourceId}] detail enrichment degraded ${diagnostic}`);
+    }
+    const enrichmentDegradedCount = enrichmentDegradedItems.length;
     const enriched = enrichedItems.flatMap((item) => {
       const relevanceScore = scoreRelevance(item, { alwaysRelevant: item.alwaysRelevant });
       const explorationCandidate = shouldExploreCandidate(item, {
@@ -306,6 +375,7 @@ export async function runIngestion({
     const acceptedBySource = new Map();
     let acceptedCount = 0;
     let watchedCount = 0;
+    const insertedArticleUrls = [];
     for (const { item, analysis, relevanceScore } of [...publishable, ...watchedConceptCandidates]) {
       const isPublished = analysis.publishDecision === "publish" && relevanceScore >= publishThreshold;
       const signalSlug = chooseSignalSlug(item, analysis, clusterCandidates);
@@ -314,6 +384,7 @@ export async function runIngestion({
         if (isPublished) skippedCount += 1;
         continue;
       }
+      insertedArticleUrls.push(article.url);
       if (!isPublished) {
         watchedCount += 1;
         continue;
@@ -330,13 +401,84 @@ export async function runIngestion({
       });
     }
 
+    let conceptUpdatedCount = 0;
+    let conceptSkippedCount = 0;
+    let conceptFailureCount = 0;
+    let conceptBackfillError = null;
+    const conceptIncrementalLimit = positiveInteger(
+      process.env.RADAR_CONCEPT_INCREMENTAL_BATCH_SIZE,
+      20,
+    );
+    const newConceptArticleUrls = insertedArticleUrls.slice(0, conceptIncrementalLimit);
+    const conceptRetryLimit = Math.min(
+      positiveInteger(process.env.RADAR_CONCEPT_RETRY_BATCH_SIZE, 4),
+      Math.max(0, conceptIncrementalLimit - newConceptArticleUrls.length),
+    );
+    const conceptRetryUrls = analysisProvider !== "rules" && trigger !== "test" && conceptRetryLimit > 0
+      ? selectConceptRetryUrls(database, {
+        limit: conceptRetryLimit,
+        excludeUrls: insertedArticleUrls,
+      })
+      : [];
+    // 新文章与历史 backlog 共享同一增量预算。新文章绝对优先，未选中的新文章
+    // 不写入 backfill 状态，继续作为 SQLite pending 留待下一轮恢复。
+    const conceptArticleUrls = [...newConceptArticleUrls, ...conceptRetryUrls];
+    if (conceptArticleUrls.length > 0 && analysisProvider !== "rules" && trigger !== "test") {
+      try {
+        const bootstrapConcepts = await bootstrapConceptsPromise;
+        const knownConcepts = () => {
+          const bySlug = new Map();
+          for (const item of [...bootstrapConcepts, ...listConceptKnowledge(database)]) {
+            const concept = item?.concept || item;
+            if (concept?.slug) bySlug.set(concept.slug, concept);
+          }
+          return [...bySlug.values()];
+        };
+        const analyzeArticle = createConceptKnowledgeAnalyzer({
+          database,
+          provider: analysisProvider,
+          knownConcepts,
+          reason: newConceptArticleUrls.length > 0
+            ? "新文章优先与失败 backlog 有界概念更新"
+            : "失败 backlog 有界概念重试",
+        });
+        const conceptResult = await runConceptKnowledgeBackfill({
+          database,
+          analyzeArticle,
+          batchSize: conceptArticleUrls.length,
+          concurrency: Number(process.env.RADAR_CONCEPT_ANALYSIS_CONCURRENCY || 2),
+          now: new Date().toISOString(),
+          articleUrls: conceptArticleUrls,
+        });
+        conceptUpdatedCount = Number(conceptResult.processedCount || 0);
+        conceptSkippedCount = Number(conceptResult.skippedCount || 0);
+        conceptFailureCount = Number(conceptResult.failedCount || 0) + Number(conceptResult.conflictCount || 0);
+        for (const failure of conceptResult.failures || []) {
+          logger.error?.(`[concept:${failure.url || "unknown"}] ${failure.error || failure.status || "analysis failed"}`);
+        }
+      } catch {
+        conceptFailureCount = conceptArticleUrls.length;
+        conceptBackfillError = "concept incremental backfill failed";
+        logger.error?.(`[concept:incremental] ${conceptBackfillError}`);
+      }
+    }
+
     const failedSources = discoveryResults.filter((result) => result.status === "error").length;
-    const degradedSourceCount = discoveryResults.filter((result) => result.status === "degraded").length;
+    const degradedSourceIds = new Set(discoveryResults
+      .filter((result) => result.status === "degraded")
+      .map((result) => result.source.id));
+    for (const sourceId of enrichmentDiagnosticsBySource.keys()) degradedSourceIds.add(sourceId);
+    const degradedSourceCount = degradedSourceIds.size;
     for (const result of discoveryResults) {
+      const enrichmentDiagnostics = enrichmentDiagnosticsBySource.get(result.source.id) || [];
+      const diagnostics = [result.error, ...enrichmentDiagnostics].filter(Boolean);
+      const status = result.status === "error"
+        ? "error"
+        : degradedSourceIds.has(result.source.id) ? "degraded" : "success";
       updateSourceHealth(database, result.source, {
         attemptedAt: result.attemptedAt,
-        status: result.status,
-        error: result.error,
+        status,
+        error: [...new Set(diagnostics)].join("; ") || null,
         itemCount: acceptedBySource.get(result.source.id) || 0,
       });
     }
@@ -365,7 +507,7 @@ export async function runIngestion({
 
     let status = dueSources.length > 0 && failedSources === dueSources.length && !modelLandscapeResult.ok
       ? "failed"
-      : failedSources || degradedSourceCount || analysisFallbackCount || modelLandscapeErrorCount ? "partial" : "success";
+      : failedSources || degradedSourceCount || analysisFallbackCount || conceptFailureCount || modelLandscapeErrorCount ? "partial" : "success";
     const actualAnalysisModes = new Set(analyzed.map(({ analysis }) => analysis.analysisMode).filter(Boolean));
     const runAnalysisMode = actualAnalysisModes.size > 1
       ? "mixed"
@@ -375,11 +517,16 @@ export async function runIngestion({
       `${cadenceSkippedSources} cadence-skipped`,
       `${dueSources.length - failedSources}/${dueSources.length} due sources available`,
       degradedSourceCount ? `${degradedSourceCount} degraded sources` : null,
+      enrichmentDegradedCount ? `${enrichmentDegradedCount} detail enrichment degradations (excerpt-only)` : null,
       `${acceptedCount} new articles`,
       watchedCount ? `${watchedCount} watched candidates` : null,
       retiredCount ? `${retiredCount} retired candidates` : null,
       analysisRepairCount ? `${analysisRepairCount} AI repairs` : null,
       analysisFallbackCount ? `${analysisFallbackCount} AI fallbacks` : null,
+      conceptUpdatedCount ? `${conceptUpdatedCount} concept knowledge revisions` : null,
+      conceptSkippedCount ? `${conceptSkippedCount} concept analyses skipped` : null,
+      conceptFailureCount ? `${conceptFailureCount} concept analyses failed (last-good retained)` : null,
+      conceptBackfillError ? `concept analysis error: ${conceptBackfillError}` : null,
       modelLandscapeResult.skipped
         ? `model landscape cadence-skipped (${modelLandscapeState.itemCount} retained)`
         : modelLandscapeResult.ok
@@ -394,9 +541,13 @@ export async function runIngestion({
       watchedCount,
       retiredCount,
       skippedCount,
-      errorCount: failedSources + degradedSourceCount + analysisFallbackCount + modelLandscapeErrorCount,
+      errorCount: failedSources + degradedSourceCount + analysisFallbackCount + conceptFailureCount + modelLandscapeErrorCount,
       degradedSourceCount,
+      enrichmentDegradedCount,
       analysisRepairCount,
+      conceptUpdatedCount,
+      conceptSkippedCount,
+      conceptFailureCount,
       configuredProvider: analysisProvider,
       runAnalysisMode,
       analysisMode: runAnalysisMode,
@@ -407,6 +558,12 @@ export async function runIngestion({
     persistedResult = result;
 
     if (status === "failed") throw new Error("所有来源采集失败，保留上一次成功快照");
+    const lifecycleMaintenance = maintainConceptKnowledgeLifecycles(database, { now: result.finishedAt });
+    if (lifecycleMaintenance.failedCount > 0) {
+      const preview = lifecycleMaintenance.failures.slice(0, 3)
+        .map((failure) => `${failure.slug}:${failure.error}`).join("、");
+      throw new Error(`概念生命周期维护失败，保留上一次成功快照：${preview}`);
+    }
     const snapshot = await buildSnapshot(database);
     await writeSnapshotAtomic(snapshot);
     return {

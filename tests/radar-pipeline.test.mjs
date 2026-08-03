@@ -29,7 +29,9 @@ after(async () => {
 const PIPELINE_TEST_ENV_KEYS = [
   "RADAR_AI_PROVIDER", "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "RADAR_DISABLE_AI", "RADAR_DISABLE_OPENAI",
   "RADAR_MAX_NEW_ITEMS", "RADAR_MAX_AI_ITEMS", "RADAR_SOURCE_CONCURRENCY", "RADAR_FETCH_CONCURRENCY",
-  "RADAR_ANALYSIS_CONCURRENCY", "RADAR_MAX_ITEM_AGE_DAYS", "RADAR_SNAPSHOT_ARTICLES",
+  "RADAR_ANALYSIS_CONCURRENCY", "RADAR_CONCEPT_ANALYSIS_CONCURRENCY", "RADAR_CONCEPT_ANALYSIS_ATTEMPTS",
+  "RADAR_CONCEPT_INCREMENTAL_BATCH_SIZE", "RADAR_CONCEPT_RETRY_BATCH_SIZE",
+  "RADAR_MAX_ITEM_AGE_DAYS", "RADAR_SNAPSHOT_ARTICLES",
 ];
 
 function configurePipelineTestEnvironment(isolatedDataDirectory, overrides = {}) {
@@ -119,6 +121,77 @@ function deepSeekPublishAnalysis(title, candidateConcept = "") {
     evidenceScore: 50,
     eventKey: "agent-harness:durable-recovery-update",
     candidateConcept,
+  };
+}
+
+function conceptKnowledgeAnalysis({ url, originalTitle, source }) {
+  const citedFields = [
+    "definition",
+    "nonDefinition",
+    "problem",
+    "whyNow",
+    "origin",
+    "mechanism",
+    "architecture",
+    "dailyDelta",
+    "aliases",
+    "implementationPatterns",
+  ];
+  return {
+    identityDecision: {
+      action: "reuse-existing",
+      canonicalSlug: "agent-harness",
+      confidence: 0.96,
+      reason: "文章描述的检查点、权限与恢复机制属于既有 Agent Harness 工程支架，而不是新的独立概念。",
+      comparedSlugs: ["agent-harness", "durable-execution"],
+    },
+    concept: {
+      slug: "agent-harness",
+      canonicalName: "Agent Harness 工程支架",
+      aliases: ["Agent Harness", "智能体工程支架"],
+      themes: ["agent-runtime", "durable-execution"],
+      stage: "emerging",
+      heat: 58,
+      maturity: 45,
+      definition: "Agent Harness 是承载智能体任务状态、工具权限、恢复与验收证据的工程运行支架。",
+      nonDefinition: "它不是一次性的提示词模板，也不是只负责调用模型接口的轻量包装层。",
+      problem: "长时间 Coding Agent 在中断、重试和人工介入后，容易丢失权威状态与完成责任。",
+      whyNow: "后台智能体任务持续变长，模型能力提升后，恢复语义和工具边界成为主要工程瓶颈。",
+      origin: "当前证据把这一做法描述为智能体工程支架；更早的命名来源仍需要继续溯源。",
+      evolution: [],
+      mechanism: "运行支架在副作用前后持久化检查点、权限决策和验收结果，并以幂等方式恢复未完成步骤。",
+      architecture: "任务控制面、持久状态存储、权限网关、工具执行器和验收器共同组成可审计闭环。",
+      designConstraints: [],
+      implementationPatterns: ["在每次不可逆工具副作用前持久化检查点，并让恢复路径复用同一套权限与验收规则。"],
+      antiPatterns: [],
+      tradeoffs: [],
+      failureModes: [],
+      securityRisks: [],
+      operationalConcerns: [],
+      applicability: [],
+      nonApplicability: [],
+      controversies: [],
+      dailyDelta: "本次证据补充了检查点恢复和工具权限边界，但仍需要更多独立实践验证。",
+      lastMeaningfulChange: "2026-08-03T01:00:00.000Z",
+    },
+    claims: [{
+      key: "checkpoint-before-side-effect",
+      text: "不可逆副作用前必须先提交能够恢复的任务检查点。",
+      kind: "mechanism",
+      confidence: 0.82,
+    }],
+    evidence: [{
+      url,
+      originalTitle,
+      sourceName: source.name,
+      sourceLayer: source.layer,
+      independentGroup: source.independentGroup,
+      supports: ["checkpoint-before-side-effect"],
+      stance: "support",
+      publishedAt: "2026-08-03T00:00:00.000Z",
+    }],
+    citations: citedFields.map((field) => ({ field, evidenceUrls: [url] })),
+    relations: [],
   };
 }
 
@@ -779,6 +852,782 @@ test("zero-selection ingestion preserves provider when healthy sources return on
     assert.equal(result.snapshot.runAnalysisMode, "none", "返回的 snapshot status 必须保留本轮实际分析口径");
     assert.equal(snapshot.status.configuredProvider, "deepseek", "落盘 status 必须保留 configured provider");
     assert.equal(snapshot.status.runAnalysisMode, "none", "落盘 status 不得把 0 入选误报为 rules 分析");
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnvironment();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("runIngestion retries failed concept backlog without requiring another new article", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-concept-retry-"));
+  const originalFetch = globalThis.fetch;
+  const restoreEnvironment = configurePipelineTestEnvironment(isolatedDataDirectory, {
+    RADAR_MAX_NEW_ITEMS: 1,
+    RADAR_SOURCE_CONCURRENCY: 40,
+    RADAR_FETCH_CONCURRENCY: 1,
+    RADAR_ANALYSIS_CONCURRENCY: 1,
+    RADAR_CONCEPT_ANALYSIS_CONCURRENCY: 1,
+    RADAR_CONCEPT_ANALYSIS_ATTEMPTS: 1,
+  });
+  const { loadSourceCatalog } = await import("../radar/catalog.mjs");
+  const source = (await loadSourceCatalog()).find((item) => item.kind === "feed" && item.layer === "official");
+  assert.ok(source, "真实目录必须提供至少一个 official feed，使测试经过生产 source→article 路径");
+  const articleUrl = "https://example.com/agent-harness/concept-backlog-retry";
+  const originalTitle = "Agent Harness adds durable checkpoint recovery";
+  const feedBody = `<?xml version="1.0"?><rss version="2.0"><channel><title>${source.name}</title><item><title>${originalTitle}</title><link>${articleUrl}</link><description>Agent harness tool permissions, checkpoints, durable recovery and acceptance tests.</description><pubDate>Mon, 03 Aug 2026 00:00:00 GMT</pubDate></item></channel></rss>`;
+  const { fetchImpl } = isolatedCatalogFetch({
+    feedUrl: source.url,
+    feedBody,
+    articleUrl,
+    articleHtml: "<html><body><article><h1>Agent Harness durable checkpoint recovery</h1><p>Agent harness persists task state before tool side effects, restores checkpoints and records acceptance evidence.</p></article></body></html>",
+    analyses: [],
+  });
+  let editorialCalls = 0;
+  let conceptCalls = 0;
+  let conceptShouldFail = true;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (!url.includes("api.deepseek.com") || !url.endsWith("/chat/completions")) {
+      throw new Error(`global fetch 只允许 DeepSeek：${url}`);
+    }
+    const request = JSON.parse(String(init.body || "{}"));
+    const isConceptRequest = String(request.messages?.[0]?.content || "").includes("证据型知识编辑");
+    if (!isConceptRequest) {
+      editorialCalls += 1;
+      return new Response(JSON.stringify({
+        choices: [{
+          finish_reason: "stop",
+          message: { content: JSON.stringify(deepSeekPublishAnalysis("Agent Harness 增加可恢复检查点")) },
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    conceptCalls += 1;
+    if (conceptShouldFail) {
+      return new Response("concept provider rejected the request", { status: 400, headers: { "content-type": "text/plain" } });
+    }
+    return new Response(JSON.stringify({
+      choices: [{
+        finish_reason: "stop",
+        message: { content: JSON.stringify(conceptKnowledgeAnalysis({ url: articleUrl, originalTitle, source })) },
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const { runIngestion } = await import("../radar/pipeline.mjs");
+    const { getSnapshotPath, openDatabase } = await import("../radar/database.mjs");
+    const first = await runIngestion({
+      trigger: "manual",
+      logger: { info() {}, warn() {}, error() {} },
+      fetchOptions: trustedFetchOptions(fetchImpl),
+      modelLandscapeFetcher: async () => [],
+    });
+    assert.equal(first.acceptedCount, 1, "概念分析失败不能回滚已经成功发布的文章采集结果");
+    assert.equal(first.conceptFailureCount, 1, "第一轮必须把概念分析失败记录为可诊断的部分失败");
+    assert.equal(editorialCalls, 1, "新文章必须经过真实的文章级 LLM 编辑入口");
+    assert.equal(conceptCalls, 1, "第一轮必须真实进入概念分析入口并失败");
+
+    let database = openDatabase();
+    try {
+      assert.equal(Number(database.prepare("SELECT COUNT(*) AS count FROM articles WHERE url = ?").get(articleUrl).count), 1);
+      const backlog = database.prepare("SELECT status, content_hash, last_error FROM concept_backfill WHERE article_url = ?").get(articleUrl);
+      assert.equal(backlog.status, "failed", "失败记录必须留在 SQLite 权威概念 backlog 中供下一轮恢复");
+      assert.ok(backlog.content_hash, "backlog 必须绑定文章内容版本，避免旧任务覆盖新正文");
+      assert.match(backlog.last_error, /HTTP 400/, "失败记录必须保留可诊断的供应商错误");
+      assert.equal(Number(database.prepare("SELECT COUNT(*) AS count FROM concept_knowledge").get().count), 0, "失败时不得发布半成品知识版本");
+    } finally {
+      database.close();
+    }
+
+    conceptShouldFail = false;
+    const second = await runIngestion({
+      trigger: "manual",
+      logger: { info() {}, warn() {}, error() {} },
+      fetchOptions: trustedFetchOptions(fetchImpl),
+      modelLandscapeFetcher: async () => [],
+    });
+    assert.equal(second.acceptedCount, 0, "第二轮不应把已存在的文章重新插入或再次计为新文章");
+    assert.equal(second.conceptUpdatedCount, 1, "即使本轮没有新文章，也必须从未完成 backlog 有界重试概念分析");
+    assert.equal(editorialCalls, 1, "backlog 重试不得重新消费已经完成的文章级 LLM 编辑");
+    assert.equal(conceptCalls, 2, "第二轮只应为唯一待处理记录增加一次概念 LLM 调用");
+
+    database = openDatabase();
+    try {
+      assert.equal(Number(database.prepare("SELECT COUNT(*) AS count FROM articles WHERE url = ?").get(articleUrl).count), 1, "恢复不得制造重复文章");
+      const completed = database.prepare("SELECT status, concept_slug, revision, last_error FROM concept_backfill WHERE article_url = ?").get(articleUrl);
+      assert.deepEqual(
+        { status: completed.status, conceptSlug: completed.concept_slug, revision: Number(completed.revision), lastError: completed.last_error },
+        { status: "completed", conceptSlug: "agent-harness", revision: 1, lastError: null },
+        "成功重试必须原子完成 backlog 与知识 revision",
+      );
+      assert.equal(Number(database.prepare("SELECT COUNT(*) AS count FROM concept_revisions WHERE concept_slug = 'agent-harness'").get().count), 1);
+      const storedConcept = database.prepare("SELECT stage, current_revision FROM concept_knowledge WHERE slug = 'agent-harness'").get();
+      assert.equal(storedConcept.stage, "candidate", "单一独立来源的 backlog 虽已成功处理，仍只能写入候选知识而不能直接公开");
+      assert.equal(Number(storedConcept.current_revision), 1);
+    } finally {
+      database.close();
+    }
+
+    const snapshot = JSON.parse(await readFile(getSnapshotPath(), "utf8"));
+    const publicConcept = snapshot.concepts.find((concept) => concept.slug === "agent-harness");
+    assert.equal(publicConcept, undefined, "成功重试不等于绕过两组独立 publish 证据的正式发布门禁");
+    assert.ok(snapshot.candidateConcepts.some((concept) => concept.slug === "agent-harness"), "成功重试后的单来源知识必须进入候选投影继续积累");
+    assert.equal(snapshot.status.articleCount, 1, "原子快照必须沿用现有文章总数契约，且不能因 backlog 重试重复计数");
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnvironment();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("scheduled ingestion automatically reprocesses a completed historical concept row when its schema or analyzer version is stale", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-concept-version-retry-"));
+  const originalFetch = globalThis.fetch;
+  const restoreEnvironment = configurePipelineTestEnvironment(isolatedDataDirectory, {
+    RADAR_CONCEPT_INCREMENTAL_BATCH_SIZE: 1,
+    RADAR_CONCEPT_RETRY_BATCH_SIZE: 1,
+    RADAR_CONCEPT_ANALYSIS_CONCURRENCY: 1,
+    RADAR_CONCEPT_ANALYSIS_ATTEMPTS: 1,
+  });
+
+  try {
+    const { loadSourceCatalog } = await import("../radar/catalog.mjs");
+    const {
+      insertArticle,
+      openDatabase,
+      upsertSourceCatalog,
+    } = await import("../radar/database.mjs");
+    const {
+      CONCEPT_ANALYZER_VERSION,
+      CONCEPT_KNOWLEDGE_SCHEMA_VERSION,
+      runConceptKnowledgeBackfill,
+    } = await import("../radar/concept-knowledge.mjs");
+    const catalog = await loadSourceCatalog();
+    const source = catalog.find((item) => item.kind === "feed" && item.layer === "official");
+    assert.ok(source, "版本补偿 fixture 必须使用真实启用的 official feed 来源身份");
+    const articleUrl = "https://version-retry.example.com/agent-harness-history";
+    const originalTitle = "Agent Harness historical recovery contract";
+    let database = openDatabase();
+    upsertSourceCatalog(database, catalog);
+    const sourceAttemptAt = new Date().toISOString();
+    database.prepare("UPDATE source_health SET last_attempt_at = ?, last_status = 'success'").run(sourceAttemptAt);
+    assert.equal(insertArticle(database, {
+      url: articleUrl,
+      sourceId: source.id,
+      sourceName: source.name,
+      sourceClass: source.class,
+      sourceLayer: source.layer,
+      sourceLanguage: source.language,
+      independentGroup: source.independentGroup,
+      originalTitle,
+      originalExcerpt: "Historical checkpoints, permissions and recovery evidence.",
+      contentText: "The engineering source describes durable checkpoints, explicit permissions and acceptance evidence.",
+      publishedAt: "2026-08-02T00:00:00.000Z",
+      discoveredAt: "2026-08-02T00:10:00.000Z",
+      contentHash: "version-retry-content-v1",
+      relevanceScore: 10,
+      signalSlug: "version-retry-agent-harness",
+      conceptSlug: "agent-harness",
+      title: "Agent Harness 历史恢复契约",
+      summary: "工程材料描述了检查点、权限和恢复验收边界。",
+      implication: "版本升级后应在有界增量预算内重新验证历史知识。",
+      topic: "工程",
+      stage: "Emerging",
+      accent: "engineering",
+      tags: ["agent-harness"],
+      analysisMode: "deepseek",
+      publishDecision: "publish",
+      editorialScore: 88,
+      aiRelevanceScore: 90,
+      noveltyScore: 72,
+      evidenceScore: 82,
+      eventKey: "agent-harness:versioned-history",
+      candidateConcept: "",
+    }), true, "fixture 必须通过生产 insertArticle 写入权威历史文章行");
+
+    const legacyPayload = conceptKnowledgeAnalysis({ url: articleUrl, originalTitle, source });
+    legacyPayload.identityDecision = {
+      action: "create-new",
+      canonicalSlug: "agent-harness",
+      confidence: 0.96,
+      reason: "旧版分析首次建立该知识对象，用于模拟真实的已完成历史边界。",
+      comparedSlugs: [],
+    };
+    const legacy = await runConceptKnowledgeBackfill({
+      database,
+      articleUrls: [articleUrl],
+      batchSize: 1,
+      concurrency: 1,
+      now: "2026-08-02T01:00:00.000Z",
+      knowledgeSchemaVersion: "concept-knowledge-legacy",
+      analyzerVersion: "concept-analyzer-legacy",
+      analyzeArticle: async () => ({ payload: legacyPayload, provider: "deepseek", model: "legacy-concept-model" }),
+    });
+    assert.equal(legacy.processedCount, 1, "fixture 必须经过生产 backfill 状态转换形成 completed 旧版本，而不是直接伪造审计行");
+    database.close();
+
+    let conceptCalls = 0;
+    globalThis.fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (!url.includes("api.deepseek.com") || !url.endsWith("/chat/completions")) {
+        throw new Error(`版本补偿只允许概念 LLM 请求：${url}`);
+      }
+      const request = JSON.parse(String(init.body || "{}"));
+      assert.match(String(request.messages?.[0]?.content || ""), /证据型知识编辑/u, "无来源到期时唯一 LLM 调用必须来自概念历史补偿链");
+      conceptCalls += 1;
+      return new Response(JSON.stringify({
+        choices: [{
+          finish_reason: "stop",
+          message: { content: JSON.stringify(conceptKnowledgeAnalysis({ url: articleUrl, originalTitle, source })) },
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    const { runIngestion } = await import("../radar/pipeline.mjs");
+    let result;
+    let runError = null;
+    try {
+      result = await runIngestion({
+        trigger: "systemd",
+        logger: { info() {}, warn() {}, error() {} },
+        fetchOptions: trustedFetchOptions(async (input) => {
+          throw new Error(`所有来源都在 cadence 内，不应抓取：${String(input)}`);
+        }),
+        modelLandscapeFetcher: async () => [],
+      });
+    } catch (error) {
+      runError = error;
+    }
+
+    database = openDatabase();
+    try {
+      const currentBoundary = database.prepare(`
+        SELECT status, knowledge_schema_version, analyzer_version
+        FROM concept_backfill
+        WHERE article_url = ?
+      `).get(articleUrl);
+      assert.deepEqual({
+        runError: runError?.message || null,
+        conceptCalls,
+        conceptUpdatedCount: result?.conceptUpdatedCount ?? null,
+        status: currentBoundary.status,
+        knowledgeSchemaVersion: currentBoundary.knowledge_schema_version,
+        analyzerVersion: currentBoundary.analyzer_version,
+      }, {
+        runError: null,
+        conceptCalls: 1,
+        conceptUpdatedCount: 1,
+        status: "completed",
+        knowledgeSchemaVersion: CONCEPT_KNOWLEDGE_SCHEMA_VERSION,
+        analyzerVersion: CONCEPT_ANALYZER_VERSION,
+      }, "普通 systemd ingest 必须把 schema/analyzer 版本纳入 completed 判断，并在同一有界 retry 预算内自动迁移旧边界");
+    } finally {
+      database.close();
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnvironment();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("scheduled ingestion retries a completed concept when source contentRoles change and readiness stays pending exactly until the new input contract completes", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-content-role-contract-retry-"));
+  const originalFetch = globalThis.fetch;
+  const restoreEnvironment = configurePipelineTestEnvironment(isolatedDataDirectory, {
+    RADAR_CONCEPT_INCREMENTAL_BATCH_SIZE: 1,
+    RADAR_CONCEPT_RETRY_BATCH_SIZE: 1,
+    RADAR_CONCEPT_ANALYSIS_CONCURRENCY: 1,
+    RADAR_CONCEPT_ANALYSIS_ATTEMPTS: 1,
+  });
+
+  try {
+    const { loadSourceCatalog } = await import("../radar/catalog.mjs");
+    const {
+      insertArticle,
+      openDatabase,
+      upsertSourceCatalog,
+    } = await import("../radar/database.mjs");
+    const {
+      CONCEPT_ANALYZER_VERSION,
+      CONCEPT_KNOWLEDGE_SCHEMA_VERSION,
+      getConceptKnowledgeStatus,
+      runConceptKnowledgeBackfill,
+    } = await import("../radar/concept-knowledge.mjs");
+    const catalog = await loadSourceCatalog();
+    const source = catalog.find((item) => item.id === "github-engineering");
+    assert.deepEqual(source?.contentRoles, ["engineering-postmortem"], "fixture 必须使用真实受控目录中的 contentRoles 来源");
+    const legacyCatalog = catalog.map((item) => (
+      item.id === source.id ? { ...item, contentRoles: [] } : item
+    ));
+    const legacySource = legacyCatalog.find((item) => item.id === source.id);
+    const articleUrl = "https://github.blog/engineering/engineering-principles/content-role-contract-history";
+    const originalTitle = "Engineering postmortem contract history";
+
+    let database = openDatabase();
+    upsertSourceCatalog(database, legacyCatalog);
+    database.prepare("UPDATE source_health SET last_attempt_at = ?, last_status = 'success'").run(new Date().toISOString());
+    assert.equal(insertArticle(database, {
+      url: articleUrl,
+      sourceId: legacySource.id,
+      sourceName: legacySource.name,
+      sourceClass: legacySource.class,
+      sourceLayer: legacySource.layer,
+      sourceLanguage: legacySource.language,
+      independentGroup: legacySource.independentGroup,
+      contentRoles: legacySource.contentRoles,
+      originalTitle,
+      originalExcerpt: "A historical engineering report describes recovery checkpoints and operational verification.",
+      contentText: "The report documents a production incident, recovery checkpoints, causal analysis, and verification boundaries.",
+      publishedAt: "2026-08-02T00:00:00.000Z",
+      discoveredAt: "2026-08-02T00:10:00.000Z",
+      contentHash: "content-role-contract-v1",
+      relevanceScore: 10,
+      signalSlug: "content-role-contract-history",
+      conceptSlug: "agent-harness",
+      title: "工程复盘内容角色契约",
+      summary: "材料描述生产事故、恢复检查点和运行验收边界。",
+      implication: "来源内容角色改变后必须重新建立概念输入契约。",
+      topic: "工程",
+      stage: "Emerging",
+      accent: "engineering",
+      tags: ["agent-harness", "postmortem"],
+      analysisMode: "deepseek",
+      publishDecision: "publish",
+      editorialScore: 88,
+      aiRelevanceScore: 90,
+      noveltyScore: 72,
+      evidenceScore: 82,
+      eventKey: "agent-harness:content-role-contract",
+      candidateConcept: "",
+    }), true);
+
+    const initialPayload = conceptKnowledgeAnalysis({ url: articleUrl, originalTitle, source: legacySource });
+    initialPayload.identityDecision = {
+      action: "create-new",
+      canonicalSlug: "agent-harness",
+      confidence: 0.96,
+      reason: "首次完成旧 contentRoles 输入契约，用于验证目录修订后的生产补偿。",
+      comparedSlugs: [],
+    };
+    const initial = await runConceptKnowledgeBackfill({
+      database,
+      articleUrls: [articleUrl],
+      batchSize: 1,
+      concurrency: 1,
+      now: "2026-08-02T01:00:00.000Z",
+      analyzeArticle: async () => ({ payload: initialPayload, provider: "deepseek", model: "content-role-contract-old" }),
+    });
+    assert.equal(initial.processedCount, 1, "旧输入契约必须通过生产 backfill 完成，而不是直接伪造 completed 行");
+    assert.equal(getConceptKnowledgeStatus(database).pendingArticleCount, 0);
+
+    upsertSourceCatalog(database, catalog);
+    const pendingAfterRoleChange = getConceptKnowledgeStatus(database).pendingArticleCount;
+    const rolesAfterChange = JSON.parse(database.prepare("SELECT content_roles_json FROM articles WHERE url = ?").get(articleUrl).content_roles_json);
+    upsertSourceCatalog(database, catalog);
+    const pendingAfterSameCatalogReplay = getConceptKnowledgeStatus(database).pendingArticleCount;
+    database.close();
+
+    let conceptCalls = 0;
+    globalThis.fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (!url.includes("api.deepseek.com") || !url.endsWith("/chat/completions")) {
+        throw new Error(`contentRoles 补偿只允许概念 LLM 请求：${url}`);
+      }
+      const request = JSON.parse(String(init.body || "{}"));
+      const systemPrompt = String(request.messages?.[0]?.content || "");
+      const userPrompt = String(request.messages?.find((message) => message?.role === "user")?.content || "");
+      assert.match(systemPrompt, /证据型知识编辑/u);
+      assert.match(userPrompt, /engineering-postmortem/u, "补偿分析必须实际读取目录同步后的新 contentRoles 输入");
+      conceptCalls += 1;
+      return new Response(JSON.stringify({
+        choices: [{
+          finish_reason: "stop",
+          message: { content: JSON.stringify(conceptKnowledgeAnalysis({ url: articleUrl, originalTitle, source })) },
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    const { runIngestion } = await import("../radar/pipeline.mjs");
+    const runScheduled = () => runIngestion({
+      trigger: "systemd",
+      logger: { info() {}, warn() {}, error() {} },
+      fetchOptions: trustedFetchOptions(async (input) => {
+        throw new Error(`所有来源都在 cadence 内，不应抓取：${String(input)}`);
+      }),
+      modelLandscapeFetcher: async () => [],
+    });
+    let firstResult;
+    let firstError = null;
+    try {
+      firstResult = await runScheduled();
+    } catch (error) {
+      firstError = error;
+    }
+    const callsAfterFirstRun = conceptCalls;
+    let secondResult;
+    let secondError = null;
+    try {
+      secondResult = await runScheduled();
+    } catch (error) {
+      secondError = error;
+    }
+
+    database = openDatabase();
+    try {
+      const statusAfterCompletion = getConceptKnowledgeStatus(database);
+      const boundary = { ...database.prepare(`
+        SELECT status, knowledge_schema_version, analyzer_version
+        FROM concept_backfill
+        WHERE article_url = ?
+      `).get(articleUrl) };
+      assert.deepEqual({
+        rolesAfterChange,
+        pendingAfterRoleChange,
+        pendingAfterSameCatalogReplay,
+        firstError: firstError?.message || null,
+        firstConceptUpdatedCount: firstResult?.conceptUpdatedCount ?? null,
+        callsAfterFirstRun,
+        secondError: secondError?.message || null,
+        secondConceptUpdatedCount: secondResult?.conceptUpdatedCount ?? null,
+        totalConceptCalls: conceptCalls,
+        pendingAfterCompletion: statusAfterCompletion.pendingArticleCount,
+        boundary,
+      }, {
+        rolesAfterChange: ["engineering-postmortem"],
+        pendingAfterRoleChange: 1,
+        pendingAfterSameCatalogReplay: 1,
+        firstError: null,
+        firstConceptUpdatedCount: 1,
+        callsAfterFirstRun: 1,
+        secondError: null,
+        secondConceptUpdatedCount: 0,
+        totalConceptCalls: 1,
+        pendingAfterCompletion: 0,
+        boundary: {
+          status: "completed",
+          knowledge_schema_version: CONCEPT_KNOWLEDGE_SCHEMA_VERSION,
+          analyzer_version: CONCEPT_ANALYZER_VERSION,
+        },
+      }, "contentRoles 改变必须进入有界 scheduled retry 和 readiness backlog；同值目录重放及完成后定时任务不得重复分析");
+    } finally {
+      database.close();
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnvironment();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("source contentRoles survive the production source-to-article path and are present in the concept LLM input", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-content-role-propagation-"));
+  const originalFetch = globalThis.fetch;
+  const restoreEnvironment = configurePipelineTestEnvironment(isolatedDataDirectory, {
+    RADAR_MAX_NEW_ITEMS: 1,
+    RADAR_SOURCE_CONCURRENCY: 4,
+    RADAR_FETCH_CONCURRENCY: 1,
+    RADAR_ANALYSIS_CONCURRENCY: 1,
+    RADAR_CONCEPT_INCREMENTAL_BATCH_SIZE: 1,
+    RADAR_CONCEPT_ANALYSIS_CONCURRENCY: 1,
+    RADAR_CONCEPT_ANALYSIS_ATTEMPTS: 1,
+  });
+
+  try {
+    const { loadSourceCatalog } = await import("../radar/catalog.mjs");
+    const { openDatabase, upsertSourceCatalog } = await import("../radar/database.mjs");
+    const catalog = await loadSourceCatalog();
+    const source = catalog.find((item) => item.id === "github-engineering");
+    assert.deepEqual(source?.contentRoles, ["engineering-postmortem"], "fixture 必须使用真实受控的工程复盘来源，而不是测试自造自由文本");
+
+    let database = openDatabase();
+    upsertSourceCatalog(database, catalog);
+    database.prepare("UPDATE source_health SET last_attempt_at = ?, last_status = 'success'").run(new Date().toISOString());
+    database.prepare("UPDATE source_health SET last_attempt_at = NULL WHERE source_id = ?").run(source.id);
+    database.close();
+
+    const articleUrl = "https://github.blog/engineering/architecture-optimization/agent-runtime-postmortem/";
+    const originalTitle = "How we recovered a long-running coding agent runtime";
+    const publishedAt = new Date(Date.now() - 30 * 60 * 1000).toUTCString();
+    const feedBody = `<?xml version="1.0"?><rss version="2.0"><channel><title>${source.name}</title><item><title>${originalTitle}</title><link>${articleUrl}</link><description>Agent runtime postmortem with checkpoints, permissions, recovery and acceptance evidence.</description><pubDate>${publishedAt}</pubDate></item></channel></rss>`;
+    const sourceFetch = async (input) => {
+      const url = String(input);
+      if (url === source.url) return new Response(feedBody, { status: 200, headers: { "content-type": "application/rss+xml" } });
+      if (url === articleUrl) {
+        return new Response("<html><body><article><h1>Agent runtime recovery postmortem</h1><p>We document checkpoint loss, permission replay, recovery design and acceptance evidence.</p></article></body></html>", {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      }
+      throw new Error(`cadence 隔离后不应请求其他来源：${url}`);
+    };
+
+    let conceptInput = "";
+    globalThis.fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (!url.includes("api.deepseek.com") || !url.endsWith("/chat/completions")) throw new Error(`只允许 DeepSeek：${url}`);
+      const request = JSON.parse(String(init.body || "{}"));
+      const isConceptRequest = String(request.messages?.[0]?.content || "").includes("证据型知识编辑");
+      if (!isConceptRequest) {
+        return new Response(JSON.stringify({
+          choices: [{ finish_reason: "stop", message: { content: JSON.stringify(deepSeekPublishAnalysis("工程复盘揭示 Agent 运行时恢复边界")) } }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      conceptInput = String(request.messages?.find((message) => message.role === "user")?.content || "");
+      return new Response(JSON.stringify({
+        choices: [{
+          finish_reason: "stop",
+          message: { content: JSON.stringify(conceptKnowledgeAnalysis({ url: articleUrl, originalTitle, source })) },
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    const { runIngestion } = await import("../radar/pipeline.mjs");
+    const result = await runIngestion({
+      trigger: "systemd",
+      logger: { info() {}, warn() {}, error() {} },
+      fetchOptions: trustedFetchOptions(sourceFetch),
+      modelLandscapeFetcher: async () => [],
+    });
+    assert.equal(result.acceptedCount, 1, "fixture 必须真实经过发现、正文 enrichment、文章编辑和持久化，不能直接调用概念适配器");
+
+    database = openDatabase();
+    try {
+      const articleColumns = new Set(database.prepare("PRAGMA table_info(articles)").all().map((column) => column.name));
+      const hasContentRolesColumn = articleColumns.has("content_roles_json");
+      const storedContentRoles = hasContentRolesColumn
+        ? JSON.parse(database.prepare("SELECT content_roles_json FROM articles WHERE url = ?").get(articleUrl).content_roles_json)
+        : null;
+      assert.deepEqual({
+        conceptInputContainsRole: conceptInput.includes('"contentRoles":["engineering-postmortem"]'),
+        hasContentRolesColumn,
+        storedContentRoles,
+      }, {
+        conceptInputContainsRole: true,
+        hasContentRolesColumn: true,
+        storedContentRoles: ["engineering-postmortem"],
+      }, "source 的受控 contentRoles 必须先落入文章权威行，再由该具体文章进入概念 LLM 输入；只在 source_health 展示不算贯穿");
+    } finally {
+      database.close();
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnvironment();
+    if (previousDataDirectory === undefined) delete process.env.RADAR_DATA_DIR;
+    else process.env.RADAR_DATA_DIR = previousDataDirectory;
+    await rm(isolatedDataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("runIngestion enforces one total concept budget across new articles and historical retry while preserving resumable priority", async () => {
+  const previousDataDirectory = process.env.RADAR_DATA_DIR;
+  const isolatedDataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-concept-total-budget-"));
+  const originalFetch = globalThis.fetch;
+  const totalBudget = 2;
+  const restoreEnvironment = configurePipelineTestEnvironment(isolatedDataDirectory, {
+    RADAR_MAX_NEW_ITEMS: 10,
+    RADAR_MAX_AI_ITEMS: 10,
+    RADAR_SOURCE_CONCURRENCY: 100,
+    RADAR_FETCH_CONCURRENCY: 4,
+    RADAR_ANALYSIS_CONCURRENCY: 1,
+    RADAR_CONCEPT_ANALYSIS_CONCURRENCY: 1,
+    RADAR_CONCEPT_ANALYSIS_ATTEMPTS: 1,
+    RADAR_CONCEPT_INCREMENTAL_BATCH_SIZE: totalBudget,
+    RADAR_CONCEPT_RETRY_BATCH_SIZE: 10,
+  });
+  const { loadSourceCatalog } = await import("../radar/catalog.mjs");
+  const catalog = await loadSourceCatalog();
+  const source = catalog.find((item) => item.kind === "feed" && item.layer === "official");
+  assert.ok(source, "总预算测试需要真实 official feed 经过生产发现链");
+
+  const publishedAt = new Date(Date.now() - 30 * 60 * 1000).toUTCString();
+  const newArticles = [
+    { url: "https://budget.example.com/new-publish-one", title: "Agent Harness Budget New Publish One", decision: "publish" },
+    { url: "https://budget.example.com/new-publish-two", title: "Agent Harness Budget New Publish Two", decision: "publish" },
+    { url: "https://budget.example.com/new-watch-three", title: "Agent Harness Budget New Watch Three", decision: "watch" },
+  ];
+  const historicalArticles = [
+    { url: "https://budget.example.com/history-pending-one", title: "Agent Harness Historical Pending One" },
+    { url: "https://budget.example.com/history-pending-two", title: "Agent Harness Historical Pending Two" },
+  ];
+  const newUrls = new Set(newArticles.map((item) => item.url));
+  const allArticleUrls = new Set([...newArticles, ...historicalArticles].map((item) => item.url));
+  const feedBody = `<?xml version="1.0"?><rss version="2.0"><channel><title>${source.name}</title>${newArticles.map((item) => (
+    `<item><title>${item.title}</title><link>${item.url}</link><description>Agent harness checkpoints, tool permissions, recovery and acceptance evidence.</description><pubDate>${publishedAt}</pubDate></item>`
+  )).join("")}</channel></rss>`;
+  const sourceByUrl = new Map(catalog.map((item) => [item.url, item]));
+  const emptyFeed = "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>Empty</title></channel></rss>";
+  const sourceFetch = async (input) => {
+    const url = String(input);
+    if (url === source.url) return new Response(feedBody, { status: 200, headers: { "content-type": "application/rss+xml" } });
+    if (allArticleUrls.has(url)) {
+      return new Response("<html><body><article><h1>Budgeted concept evidence</h1><p>Agent harness checkpoints, tool permissions, durable recovery and acceptance tests.</p></article></body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    }
+    const configured = sourceByUrl.get(url);
+    if (configured?.kind === "json") {
+      const body = configured.parser === "hacker-news" ? { hits: [] }
+        : configured.parser === "bluesky-search" ? { posts: [] }
+          : configured.parser === "openreview-notes" ? { notes: [] }
+            : configured.parser === "dblp-publications" ? { result: { hits: { hit: [] } } }
+              : [];
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response(emptyFeed, { status: 200, headers: { "content-type": "application/rss+xml" } });
+  };
+
+  const { insertArticle, openDatabase, upsertSourceCatalog } = await import("../radar/database.mjs");
+  let database = openDatabase();
+  try {
+    upsertSourceCatalog(database, [source]);
+    for (const [index, article] of historicalArticles.entries()) {
+      assert.equal(insertArticle(database, {
+        url: article.url,
+        sourceId: source.id,
+        sourceName: source.name,
+        sourceClass: source.class,
+        independentGroup: source.independentGroup,
+        sourceLayer: source.layer,
+        sourceLanguage: source.language,
+        originalTitle: article.title,
+        originalExcerpt: "Historical concept backlog evidence.",
+        contentText: "Agent harness historical checkpoints, recovery and acceptance evidence.",
+        publishedAt: `2026-08-0${index + 1}T00:00:00.000Z`,
+        discoveredAt: `2026-08-0${index + 1}T00:10:00.000Z`,
+        contentHash: `historical-budget-${index}`,
+        relevanceScore: 10,
+        signalSlug: `historical-budget-${index}`,
+        conceptSlug: "agent-harness",
+        title: `历史概念待恢复记录 ${index + 1}`,
+        summary: "历史文章已经完成中文编辑，但概念知识处理仍处于待恢复状态。",
+        implication: "后续增量轮次应在总预算内恢复，且不得挤占同轮新文章优先级。",
+        topic: "工程",
+        stage: "Emerging",
+        accent: "engineering",
+        tags: ["agent-harness"],
+        analysisMode: "deepseek",
+        publishDecision: "publish",
+        editorialScore: 82,
+        aiRelevanceScore: 90,
+        noveltyScore: 70,
+        evidenceScore: 88,
+        eventKey: `agent-harness:historical-budget-${index}`,
+        candidateConcept: "",
+      }), true);
+    }
+  } finally {
+    database.close();
+  }
+
+  const editorialUrls = [];
+  const conceptCallUrls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (!url.includes("api.deepseek.com") || !url.endsWith("/chat/completions")) throw new Error(`global fetch 只允许 DeepSeek：${url}`);
+    const request = JSON.parse(String(init.body || "{}"));
+    const isConceptRequest = String(request.messages?.[0]?.content || "").includes("证据型知识编辑");
+    const userInput = String(request.messages?.find((message) => message.role === "user" && String(message.content).includes("<untrusted-source>"))?.content
+      || request.messages?.findLast((message) => message.role === "user")?.content
+      || request.input
+      || "");
+    if (isConceptRequest) {
+      const match = userInput.match(/<untrusted-source>\s*(\{[\s\S]*?\})\s*<\/untrusted-source>/u);
+      assert.ok(match, "概念分析请求必须保留可验证的原始文章对象");
+      const article = JSON.parse(match[1]);
+      conceptCallUrls.push(article.url);
+      const analysis = conceptKnowledgeAnalysis({
+        url: article.url,
+        originalTitle: article.originalTitle,
+        source: { name: article.sourceName, layer: article.sourceLayer, independentGroup: article.independentGroup },
+      });
+      return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(analysis) } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    const newArticle = newArticles.find((item) => userInput.includes(item.title));
+    assert.ok(newArticle, "文章编辑请求必须对应本轮真实发现的新文章");
+    editorialUrls.push(newArticle.url);
+    const analysis = {
+      ...deepSeekPublishAnalysis(`预算约束下的新文章：${newArticle.title}`),
+      publishDecision: newArticle.decision,
+      candidateConcept: newArticle.decision === "watch" ? "预算约束候选概念" : "",
+    };
+    return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(analysis) } }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    const { runIngestion } = await import("../radar/pipeline.mjs");
+    const { getConceptKnowledgeStatus } = await import("../radar/concept-knowledge.mjs");
+    const first = await runIngestion({
+      trigger: "manual",
+      logger: { info() {}, warn() {}, error() {} },
+      fetchOptions: trustedFetchOptions(sourceFetch),
+      modelLandscapeFetcher: async () => [],
+    });
+    const firstRoundCalls = [...conceptCallUrls];
+    assert.ok(
+      first.acceptedCount >= 2 && first.watchedCount >= 1,
+      `fixture 必须真实持久化多条新 publish/watch，不能用历史行代替新文章链路（accepted=${first.acceptedCount}, watched=${first.watchedCount}, fetched=${first.fetchedCount}, editorial=${editorialUrls.length}, message=${first.message}）`,
+    );
+    assert.equal(firstRoundCalls.length, totalBudget, "同一增量轮次的新文章和历史 retry 必须共享 RADAR_CONCEPT_INCREMENTAL_BATCH_SIZE 总预算");
+    assert.ok(firstRoundCalls.every((url) => newUrls.has(url)), "总预算不足时必须先处理新文章，历史 backlog 不能抢占同轮新文章");
+    assert.equal(editorialUrls.length, 3, "三条新文章必须各自经过文章编辑分析，概念预算不能误伤发现与持久化");
+
+    database = openDatabase();
+    let firstPendingUrls;
+    try {
+      firstPendingUrls = database.prepare(`
+        SELECT a.url FROM articles a
+        WHERE a.publish_decision IN ('publish', 'watch') AND NOT EXISTS (
+          SELECT 1 FROM concept_backfill b
+          WHERE b.article_url = a.url AND b.content_hash = a.content_hash AND b.status = 'completed'
+        )
+        ORDER BY a.url
+      `).all().map((row) => row.url);
+      assert.equal(getConceptKnowledgeStatus(database).pendingArticleCount, 3, "超出首轮总预算的一条新文章和两条历史记录必须继续保留为 SQLite pending");
+      assert.equal(firstPendingUrls.length, 3);
+    } finally {
+      database.close();
+    }
+
+    const callsBeforeSecond = conceptCallUrls.length;
+    const second = await runIngestion({
+      trigger: "manual",
+      logger: { info() {}, warn() {}, error() {} },
+      fetchOptions: trustedFetchOptions(sourceFetch),
+      modelLandscapeFetcher: async () => [],
+    });
+    const secondRoundCalls = conceptCallUrls.slice(callsBeforeSecond);
+    assert.equal(second.acceptedCount, 0, "第二轮不能把相同来源文章再次计为新文章");
+    assert.equal(secondRoundCalls.length, totalBudget, "无新文章的下一轮应继续恢复 backlog，但历史 retry 原有上限也不能越过总预算");
+    assert.ok(secondRoundCalls.every((url) => firstPendingUrls.includes(url)), "第二轮只能消费首轮 SQLite 中保留的 pending 记录");
+
+    database = openDatabase();
+    try {
+      assert.equal(getConceptKnowledgeStatus(database).pendingArticleCount, 1, "第二轮应按总预算减少 backlog，并为后续轮次保留剩余任务");
+    } finally {
+      database.close();
+    }
   } finally {
     globalThis.fetch = originalFetch;
     restoreEnvironment();
@@ -1482,8 +2331,16 @@ test("DeepSeek analysis uses JSON Output and records the real provider", async (
     assert.deepEqual(requestBody.response_format, { type: "json_object" });
     assert.deepEqual(requestBody.thinking, { type: "disabled" });
     assert.match(requestBody.messages[0].content, /JSON/);
-    assert.match(requestBody.messages[0].content, /conceptSlug 只能是/);
-    assert.match(requestBody.messages[0].content, /coding-agent/);
+    assert.doesNotMatch(
+      requestBody.messages[0].content,
+      /conceptSlug\s*只能是/u,
+      "概念发现不能继续把 conceptSlug 锁死在固定目录",
+    );
+    assert.match(
+      requestBody.messages[0].content,
+      /conceptSlug[\s\S]{0,240}(?:a-z0-9|kebab|短横线|格式)/iu,
+      "动态概念 slug 仍必须使用稳定、可审计的格式约束",
+    );
   } finally {
     globalThis.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY;
@@ -1538,7 +2395,7 @@ test("DeepSeek keeps valid prose and repairs out-of-contract categorical fields"
             summary: "官方版本加入任务恢复能力，但大规模生产采用仍需要更多证据。",
             implication: "团队应验证检查点恢复、幂等重试和运行时可观测性。",
             topic: "技术趋势",
-            conceptSlug: "agent-runtime-management",
+            conceptSlug: "Agent Runtime Management!",
             stage: "Mature",
             accent: "runtime",
             tags: ["agent-harness", "runtime"],
@@ -1963,6 +2820,7 @@ test("runIngestion retires a stored watch candidate when later AI review rejects
     language: "zh",
   };
   const { insertArticle, openDatabase, upsertSourceCatalog } = await import("../radar/database.mjs");
+  const { getConceptKnowledgeStatus, runConceptKnowledgeBackfill } = await import("../radar/concept-knowledge.mjs");
   const seedDatabase = openDatabase();
   try {
     upsertSourceCatalog(seedDatabase, [source]);
@@ -1999,6 +2857,25 @@ test("runIngestion retires a stored watch candidate when later AI review rejects
       eventKey: "agent-reliability-engineering:origin",
       candidateConcept: candidateName,
     }), true);
+    const failedConceptRun = await runConceptKnowledgeBackfill({
+      database: seedDatabase,
+      batchSize: 1,
+      concurrency: 1,
+      articleUrls: [articleUrl],
+      now: "2026-08-03T07:00:00.000Z",
+      analyzeArticle: async () => {
+        throw new Error("concept analysis failed before editorial retirement");
+      },
+    });
+    assert.equal(failedConceptRun.failedCount, 1, "fixture 必须先通过生产概念回填链留下同 content_hash 的 failed 状态");
+    assert.deepEqual(
+      {
+        pending: getConceptKnowledgeStatus(seedDatabase).pendingArticleCount,
+        failed: getConceptKnowledgeStatus(seedDatabase).failedArticleCount,
+      },
+      { pending: 1, failed: 1 },
+      "仍为 publish/watch 且 content_hash 未变化时，失败必须继续计入 pending 与 failed readiness 门禁",
+    );
   } finally {
     seedDatabase.close();
   }
@@ -2061,6 +2938,12 @@ test("runIngestion retires a stored watch candidate when later AI review rejects
         "已退休候选不能继续出现在 candidateConcepts",
       );
       assert.deepEqual(snapshot.signals, [], "被否决候选不能出现在公开信号中");
+      const retiredBackfill = database.prepare("SELECT status, content_hash FROM concept_backfill WHERE article_url = ?").get(articleUrl);
+      assert.equal(retiredBackfill.status, "failed", "文章退役不得靠直接删除历史 backfill 记录伪造 readiness");
+      assert.equal(retiredBackfill.content_hash, "watch-before-rejection", "历史失败应保留其原内容版本供审计");
+      const retiredKnowledgeStatus = getConceptKnowledgeStatus(database);
+      assert.equal(retiredKnowledgeStatus.pendingArticleCount, 0, "reject 文章不再属于可达概念 backlog");
+      assert.equal(retiredKnowledgeStatus.failedArticleCount, 0, "已退役 reject 或 content_hash 已变化的旧失败不得永久阻断 concept readiness");
     } finally {
       database.close();
     }

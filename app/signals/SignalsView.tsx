@@ -8,7 +8,7 @@ import { SignalCard } from "../components/SignalCard";
 
 const stages = ["全部阶段", "Spark", "Emerging", "Validated", "Cooling"];
 
-export function SignalsView({ initialStage, signals, status }: { initialStage?: string; signals: Signal[]; status: RadarStatus }) {
+export function SignalsView({ initialStage, signals, conceptSlugs, status }: { initialStage?: string; signals: Signal[]; conceptSlugs: string[]; status: RadarStatus }) {
   const router = useRouter();
   const pathname = usePathname();
   const stage = stages.includes(initialStage ?? "") ? initialStage! : "全部阶段";
@@ -36,7 +36,7 @@ export function SignalsView({ initialStage, signals, status }: { initialStage?: 
           {stages.map((item) => <button type="button" aria-pressed={stage === item} onClick={() => selectStage(item)} key={item}>{stage === item && <span aria-hidden="true">✓</span>}{item}</button>)}
         </div>
       </section>
-      <div className="signal-stream wide-stream">{visible.map((signal) => <SignalCard signal={signal} key={signal.slug} />)}</div>
+      <div className="signal-stream wide-stream">{visible.map((signal) => <SignalCard signal={signal} conceptAvailable={Boolean(signal.conceptSlug && conceptSlugs.includes(signal.conceptSlug))} key={signal.slug} />)}</div>
     </AppShell>
   );
 }

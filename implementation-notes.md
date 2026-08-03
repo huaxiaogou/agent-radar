@@ -576,3 +576,166 @@
 - Server-rendered route suite: 15/15 passed.
 - Next.js production build, TypeScript, ESLint and `git diff --check` passed.
 - Remaining external risk is route-specific WAF/rate limiting from the mainland server; failures remain explicit source-health errors and never count an empty parse as healthy.
+
+## 2026-08-03 · Living concept knowledge base rebuild
+
+### Locked scope and risk boundaries
+
+- The authoritative path is `source ingestion -> article analysis -> SQLite articles -> atomic snapshot -> /concepts`. Static `config/concepts.json` may bootstrap canonical names, but it must not remain the public source of truth for knowledge content, evidence maturity or revisions.
+- Heat and maturity are independent dimensions. Community engagement may raise heat and discovery priority; it cannot increase maturity, confidence or independent verification.
+- Independence is keyed by `independent_group`, not endpoint count. A vendor blog, repository and issue tracker from the same organization remain one evidentiary group.
+- Concept synthesis is append-only and versioned. Invalid model JSON, fabricated evidence URLs, failed Chinese editorial checks, stale compare-and-swap writes and interrupted backfills must leave the current public revision and snapshot unchanged.
+- Historical work must be resumable and idempotent under the existing exclusive task lock. No destructive migration or silent overwrite is allowed.
+
+### Four-quadrant scan
+
+- Known knowns: the local database has 48 historical published articles across seven concept slugs; production has a larger live corpus. Existing article editorial backfill already demonstrates concurrency, CAS and atomic publication patterns.
+- Known unknowns: DeepSeek latency/shape drift, production backfill duration, legacy rows missing source-layer metadata and sparse concepts with only one independent group. These require strict validation, bounded concurrency, deterministic evidence computation and explicit backlog/status output.
+- Unknown knowns: aliases hidden in original titles, repeated vendor endpoints that look independent, community heat that can accidentally leak into maturity and old rules-only English edits. Tests must encode these boundaries before production changes.
+- Unknown unknowns: future concept merges, contested claims, new relationship types and partial corruption during a long batch. Redirects, typed relation allowlists, revision history, transaction boundaries and last-good retention contain these failures.
+
+### Visual direction
+
+- Palette stays inside the existing Radar system: canvas `#F2F6F8`, surface `#FFFFFF`, ink `#10243E`, evidence blue `#2251FF`, engineering teal `#0B7285`, conflict red `#B42318`.
+- UI typography remains the current sans/data-mono pairing. Large display type is reserved for the page thesis and concept name; evidence metadata, revision IDs and maturity readings use the mono role.
+- Concepts home wireframe: learning thesis and daily delta ledger; status/search/filter rail; changed/contested/new learning queue; domain-grouped knowledge atlas; candidate observatory.
+- Concept detail wireframe: breadcrumb and identity; sticky maturity/evidence rail; anchored long-form dossier; mechanism and implementation patterns; constraints/failure modes; typed claim-evidence ledger; relationships and revision history.
+- Signature element: a revision ledger that answers “今天理解发生了什么变化” before showing inventory counts. Generic stat-card grids and decorative AI imagery are explicitly excluded.
+
+### Baseline evidence
+
+- Before this session, `npm test` passed 142 unit/integration tests, the production build and 15 rendered-route tests. The worktree was clean at `ebdb52a`.
+
+## 2026-08-03 · Living concept knowledge base finalization
+
+### Deviations
+
+- The first lifecycle implementation allowed one official group to become Emerging. The final rule requires at least two independent publish-support groups, with at least one official or practitioner; Contested additionally requires that formal support base before a publish conflict.
+- A UI resilience fixture originally wrote an all-empty engineering shell through the normal revision API. The production gate remains strict; the test now injects an explicitly marked `legacy-migration` record to verify fail-soft rendering without weakening new writes.
+- The initial merge function only moved aliases and installed a redirect. It now creates a transactional canonical revision that folds valid claims, evidence and citations before redirect publication.
+- The original snapshot stayed on generic `version=1`. A separate `knowledgeSchemaVersion=1` marker was added so legacy static concept snapshots fail closed without coupling unrelated snapshot fields to the knowledge protocol.
+
+### Discovered edge cases
+
+- Read models were being spread back into persisted concepts, recursively embedding revisions, claims and evidence; seven revisions grew from roughly 4 KB to 6.59 MB. Persisted concept fields now use a strict domain allowlist and grow near-linearly.
+- A current concept payload can be corrupt even when append-only revisions remain valid. Reads now recover the latest structurally valid revision, expose `integrityStatus` and `recoveredRevision`, and readiness reports a warning instead of silently dropping the concept.
+- Formal concepts were leaking watch/reject evidence through claims, citations and revision payloads. Public projection now follows the article's current publish decision and filters every dependent object while append-only history remains intact.
+- New articles and historical concept retries previously had separate effective budgets, and permanent failures could monopolize retry slots. They now share one total budget; new current-hash pending records take priority and failures rotate by oldest attempt.
+- An active lease on every remaining article made the backfill CLI loop without progress until `max-batches`. A zero-progress batch now exits partial immediately and preserves the old snapshot.
+- Raw model validation errors could echo an attacker-controlled URL into the correction prompt. Concept correction now emits only fixed categories and safe field names for both DeepSeek and OpenAI.
+- SQLite revision child tables were mutable even though the parent ledger was append-only. Claims, evidence, relations and citations now reject UPDATE and DELETE.
+- A relation parser treated an empty known-concept set as “validation disabled.” Empty is now authoritative: non-empty relations are rejected unless both endpoints already exist as formal knowledge objects.
+- Signal-only slugs could render a twelve-section pseudo-concept dossier. They now return 404 and search links to a stable `/signals#slug` anchor.
+- Historical high-heat concepts could occupy “learning priority” indefinitely. The queue now first requires a real evidence or material-revision event within seven days.
+
+### Questions for review
+
+- The local repository has no production DeepSeek/OpenAI key and its current database does not contain the production corpus. Structural real-history rehearsal is possible locally, but final content-quality approval still requires running the idempotent backfill on the server and reading generated dossiers rather than relying only on schema/tests.
+- Mainland source availability remains external and route-specific. Relay/proxy configuration may improve coverage, but the knowledge maturity rules must continue to count independent organizations rather than endpoint availability.
+
+### Session summary
+
+- Deviations count: 4.
+- Most likely revisit: the exact two-group/three-group lifecycle thresholds after enough production evidence has accumulated; changing them must remain a deterministic rule and migration, never an LLM suggestion.
+- Edge cases found: 10; recursive payloads, corruption recovery, publication leakage, budget starvation, lease spin, prompt echo, mutable audit rows, empty-known relations, pseudo-concepts and historical-heat ranking are handled.
+- Questions awaiting review: 2 external validation items—production LLM content quality and mainland network coverage.
+- Next session should read this section, `radar/concept-knowledge.mjs`, `radar/concept-analyze.mjs`, `radar/pipeline.mjs`, `radar/snapshot.mjs`, `scripts/check-concepts.mjs` and `scripts/merge-concepts.mjs` before changing concept semantics or operations.
+## Dynamic concept knowledge system session
+
+### Confirmed product decisions
+
+- `/concepts` is a general upper-layer knowledge system for advanced AI Coding engineers, not a static glossary, news view or project-specific recommender.
+- The controlled engineering-theme taxonomy is navigation metadata, not a fixed concept allowlist. High-quality official and practitioner material may propose previously unknown concepts.
+- One article may establish or revise several independently nameable mechanisms. Identity is decided before persistence as `reuse-existing`, `create-new` or `needs-review` and remains visible in the append-only audit record.
+- Candidate knowledge stays separate from formal knowledge but is still learnable: it has a stable slug, internal detail page, evidence layers, independent-source breadth, latest revision and explicit promotion gaps.
+
+### Deviations
+
+- The first knowledge extractor accepted a single concept object. Analyzer v2 uses a bounded `concepts` array and atomically applies every validated output from one article; the legacy single-object shape remains read-compatible only for controlled migration and tests.
+- Historical idempotency originally used only article URL and content hash. It now includes knowledge-schema and analyzer versions, so an extractor upgrade reprocesses old successful rows once without requiring a database purge.
+- The existing static concept catalog remains an identity/bootstrap comparison input but cannot populate the public concept directory. A first evidence-backed revision may reuse one of those known identities before a SQLite knowledge row exists; that bootstrap identity must have been included in the analyzer's validated known set.
+
+### Discovered edge cases
+
+- A model can return two individually valid concepts plus one invalid concept from the same article. Publishing only the valid subset would make retries nondeterministic, so the whole article result commits in one transaction or rolls back completely.
+- Exact slug matching is insufficient for bilingual aliases, while an external embedding service would add an unavailable correctness dependency. The provider makes a structured semantic decision from canonical names, aliases, definitions and mechanisms; local deterministic collision checks remain authoritative.
+- `reuse-existing` is valid for a known bootstrap identity even before that identity has an evidence-backed SQLite revision. The analyzer now carries its validated known-slug set into the transactional writer; arbitrary direct writes cannot use this exception.
+- Stored candidate knowledge and an article-level candidate can describe the same identity. The public projection normalizes slug/name/aliases before rendering so the homepage shows one candidate and its stable internal detail link.
+- Long-form source responsibilities cannot be inferred from source names. `contentRoles` is a validated allowlist persisted through catalog, SQLite and snapshot; current practitioner coverage explicitly includes podcast transcripts, interviews and engineering postmortems.
+- Empty or unknown themes must fail closed. Legacy payloads that genuinely predate the field receive a controlled compatibility theme, but an explicit empty/invalid model result is rejected rather than silently repaired.
+- A multi-concept response can select a second existing identity that was not implied by the article's old single classification. The analyzer now reloads every newly selected canonical dossier and performs a bounded preservation pass before accepting the rewrite; validation retry budget and preservation refinement are tracked separately.
+- Keeping `force=true` across explicit URL batches without removing already processed URLs repeatedly claimed the first article. The backfill result now reports updated URLs so the CLI advances an explicit remaining-URL set while keeping every unprocessed URL forced.
+
+### Verification
+
+- Full unit/integration suite: 257/257.
+- Next.js production build and TypeScript: passed.
+- Server-rendered route contracts: 39/39.
+- ESLint and `git diff --check`: passed.
+- Real production history still requires the server LLM key and SQLite corpus; deployment must run editorial backfill, analyzer-v2 concept backfill, `concepts:check`, and a manual content-quality sample before this session can be considered operationally complete.
+
+## 2026-08-03 · Concept learning and incremental compensation closeout
+
+### Confirmed decisions
+
+- A completed history row is current only when its article content hash, knowledge-schema version and analyzer version all match. Normal cadence-aware ingestion gradually compensates stale protocol rows inside the existing retry budget; a first deployment or major protocol upgrade still runs the explicit full backfill to reach readiness promptly.
+- Source `contentRoles` are authoritative controlled metadata, not a name-based heuristic. They survive catalog synchronization and article persistence, and are present in the untrusted source context passed to concept analysis; unknown or corrupt values fail closed to an empty list.
+- `/concepts` is a daily learning surface as well as a ledger. Five formal-only categories are bounded to three entries, use Asia/Shanghai day boundaries, require recent evidence or material revisions for weekly queues, and expose honest empty states instead of static filler.
+
+### Discovered edge cases
+
+- A historical completed row with a current content hash but an old analyzer version was previously invisible to normal ingestion and could remain stale forever unless an operator remembered a full backfill. Version-aware bounded retry closes that gap without allowing migration work to starve new articles.
+- Existing article rows predated `content_roles_json`. Catalog upsert now synchronizes the current controlled roles into those rows so a historical backfill receives the same content responsibilities as new ingestion.
+- Initial concept creation contains a field diff that can mention controversies; treating it as a controversy revision would place a brand-new concept in two learning categories. The controversy queue therefore requires a material revision after revision 1 or current conflict evidence.
+- Global SSR selectors for formal concepts also matched the new learning items, and old timezone fixtures expected a fourth result despite the explicit three-item cap. Tests now scope formal ledger assertions and preserve Shanghai boundary coverage while still proving that a fourth eligible item is excluded.
+- A readiness failure while opening a corrupt, locked or inaccessible SQLite file previously returned only `READINESS_CHECK_FAILED`. The CLI now adds a fixed safe category and actionable storage/permission/lock/integrity guidance without echoing exception text, credentials, environment names or internal absolute paths.
+
+### Verification and external boundary
+
+- Unit/integration suite: 257/257.
+- Server-rendered route contracts: 39/39.
+- Local `radar:status` still describes the old 16-source, 48-article rules snapshot; local concept status is 0 formal, 0 candidate, 0 revision, 0 evidence, 0 claim and 48 pending articles.
+- This proves the implementation and migration contracts locally, but not production content quality. Operational completion still requires the server LLM credentials and production SQLite corpus, successful editorial and concept backfills, `concepts:check`, atomic restart, and manual dossier/evidence sampling.
+
+## 2026-08-03 · Concept authority, learning semantics and operations closeout
+
+### Correctness decisions
+
+- A watched candidate whose current article decision becomes `reject` is retired through a system-only archival path. The rejected URL remains only in append-only audit history; the current candidate projection has no public evidence, claims or citations, and snapshot publication remains available.
+- The source catalog is authoritative for historical article identity. Catalog upsert synchronizes source name, class, independent group, evidence layer, language and controlled content roles in the same transaction; lifecycle maintenance then appends a reprojected revision instead of mutating old revisions or preserving false independence.
+- Historical concept idempotency now includes a SHA-256 input-contract fingerprint over article content hash and normalized controlled content roles. A role change re-enters backfill even when body/schema/analyzer are unchanged; commit-time CAS rejects body or role drift and retains last-good knowledge.
+- Detail enrichment failure is not a silent success. Feed excerpts remain usable as `excerpt-only`, while the item, deduplicated source health and run become degraded/partial with a fixed safe diagnostic code. Discovery fallback plus enrichment fallback for the same source counts as one degraded source.
+- `recentFailures` exposes at most ten newest current-boundary failed/conflict articles as URL, status and attempted time. It excludes stale body/role/schema/analyzer boundaries and never selects or serializes stored model error text.
+
+### Product semantics corrected
+
+- Shared evidence may appear beside every claim it actually supports; deduplication is local to one claim and to the separate source inventory, not global across claims.
+- Missing evolution evidence renders an explicit evidence-insufficient state. Signal recency and titles can no longer masquerade as concept origin or evolution.
+- “Today revised” finds the latest material revision within the Shanghai day even when a later context-only revision exists.
+- “Weekly warming” requires positive heat/temperature field diffs within seven days and ranks by cumulative increase, largest single increase and latest increase. Current high heat or a generic recent event cannot fill the queue.
+- Promoted canonical identities are removed from the candidate projection by slug, normalized name, alias and merge redirect. Formal relations include navigable targets, confidence and adjacent source links; unavailable/corrupt snapshots fail the relation graph closed.
+
+### Verification and external gate
+
+- Unit/integration suite: 265/265.
+- Server-rendered route contracts: 46/46.
+- Next.js production build, TypeScript, ESLint, shell syntax and `git diff --check`: passed.
+- The local database remains the old 16-source/48-article rules corpus: 0 formal concepts, 0 candidates and 48 pending concept analyses. `recentFailures=[]` is expected because no current concept attempt has run locally.
+- Code and migration contracts are complete locally. Operational acceptance remains external until the production DeepSeek/OpenAI credentials and production SQLite corpus complete editorial backfill, analyzer-v2 concept backfill, readiness checks, atomic restart and the documented manual sample of formal dossiers, candidates, multi-concept articles, revisions and claim-to-evidence bindings.
+
+## 2026-08-03 · Final authority and operational hardening review
+
+### Correctness closeout
+
+- Incremental retry selection and readiness now use the same input-contract boundary as the backfill worker: article body hash plus normalized `contentRoles`, knowledge schema and analyzer version. A catalog role correction becomes pending exactly once, is selected inside the bounded retry budget, and returns to completed only after the new contract commits.
+- Lifecycle maintenance can append an `archived` revision for a formerly formal concept after all current evidence becomes non-public. In the same deterministic projection it appends source-concept revisions that remove inbound relations to the retiring target; historical revisions and old edges remain immutable audit evidence.
+- Operational failure projections strip URL query and fragment data and reduce provider errors to fixed safe categories. Authoritative article and evidence URLs are unchanged, while backfill results, readiness, CLI output, pipeline logs, snapshots and `/api/status` expose only a safe HTTPS host+path locator.
+- `recentFailures` survives the server normalization boundary, including an explicit empty array for current and legacy snapshots. Raw or hand-edited snapshots receive the same defense-in-depth URL and error-field cleanup before the public status API.
+- The scheduler validates the resolved Node binary as the final systemd `APP_USER` before writing units, rejects runtimes below Node 22.13.0, and performs a real `node:sqlite` capability import; `radar:status` loads the project `.env.production` before resolving SQLite or snapshot paths. Concept evidence cards use `h3` inside dossier `h2` sections.
+
+### Verification and remaining external gate
+
+- Unit/integration suite: 272/272.
+- Server-rendered route contracts: 46/46.
+- Next.js production build and TypeScript: passed.
+- The final external gate is unchanged: run the analyzer-v2 concept backfill against the production corpus with the configured provider, pass `concepts:check`, publish/restart atomically, then manually sample formal dossiers, candidates, multi-concept articles, revisions and claim-to-evidence links. Until that content audit is complete, operational acceptance remains open.

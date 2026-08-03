@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
@@ -13,19 +14,74 @@ import {
   openDatabase,
 } from "./database.mjs";
 import { isLlmEditorialReady } from "./editorial.mjs";
+import {
+  assertConceptPublicationReady,
+  getConceptPublicationReadiness,
+  listConceptKnowledge,
+  listConceptRedirects,
+  normalizeConceptAliasKey,
+} from "./concept-knowledge.mjs";
 
-const conceptsUrl = new URL("../config/concepts.json", import.meta.url);
 const modelAliasesUrl = new URL("../config/model-aliases.json", import.meta.url);
 
-const RELATIONS = [
-  { from: "Agent Manager", type: "操作", to: "Multi-agent Orchestration", note: "人的控制平面" },
-  { from: "Multi-agent Orchestration", type: "约束于", to: "Graph Engineering", note: "协调策略进入执行图" },
-  { from: "Graph Engineering", type: "依赖", to: "Durable Execution", note: "检查点、重试、暂停" },
-  { from: "Agent Harness", type: "承载", to: "Context Engineering", note: "运行时组织可见上下文" },
-  { from: "Agent Manager", type: "观察", to: "Agent Harness", note: "任务状态、审批与遥测" },
-  { from: "Coding Agent", type: "运行于", to: "Agent Harness", note: "工具循环与权限边界" },
-  { from: "Agent Harness", type: "连接", to: "Model Context Protocol", note: "工具与数据协议" },
-];
+function safeJsonArray(value) {
+  try {
+    const parsed = JSON.parse(value || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+const RELATION_LABELS = {
+  "depends-on": "依赖",
+  enables: "促成",
+  implements: "实现",
+  extends: "扩展",
+  complements: "互补",
+  "conflicts-with": "冲突",
+  supersedes: "取代",
+  "constrained-by": "约束于",
+  operationalizes: "工程化",
+  "often-confused-with": "易混淆",
+};
+
+function buildStoredConceptRelations(database) {
+  const knowledge = listConceptKnowledge(database)
+    .map((entry) => entry?.concept)
+    .filter((concept) => concept && !["candidate", "archived"].includes(String(concept.stage || "").toLowerCase()));
+  const names = new Map(knowledge.map((concept) => [concept.slug, concept.canonicalName || concept.name || concept.slug]));
+  const isPublicEvidence = database.prepare("SELECT 1 FROM articles WHERE url = ? AND publish_decision = 'publish'");
+  const relations = new Map();
+
+  for (const concept of knowledge) {
+    for (const relation of concept.relations || []) {
+      const relationType = String(relation?.type || "");
+      const targetSlug = String(relation?.targetSlug || "");
+      if (!RELATION_LABELS[relationType] || !names.has(targetSlug) || targetSlug === concept.slug) continue;
+      const evidenceUrls = [...new Set((relation.evidenceUrls || []).filter((url) => isPublicEvidence.get(url)))];
+      if (!evidenceUrls.length) continue;
+      const projected = {
+        from: names.get(concept.slug),
+        type: RELATION_LABELS[relationType],
+        relationType,
+        to: names.get(targetSlug),
+        note: String(relation.explanation || "").trim(),
+        evidenceUrls,
+        confidence: Math.max(0, Math.min(1, Number(relation.confidence || 0))),
+      };
+      const key = `${concept.slug}:${relationType}:${targetSlug}`;
+      const previous = relations.get(key);
+      if (!previous || projected.confidence > previous.confidence) relations.set(key, projected);
+    }
+  }
+
+  return [...relations.values()].sort((left, right) => (
+    right.confidence - left.confidence
+      || left.from.localeCompare(right.from)
+      || left.to.localeCompare(right.to)
+  ));
+}
 
 const PLAYBOOKS = [
   { title: "从单 Agent 到 Agent Manager", description: "判断何时值得并行、如何拆边界，以及主 Agent 应保留哪些决策。", steps: 6, maturity: "可执行" },
@@ -257,23 +313,67 @@ function buildDigests(signals) {
   }));
 }
 
-async function buildConcepts(signals) {
-  const catalog = JSON.parse(await readFile(conceptsUrl, "utf8"));
-  const now = Date.now();
-  return catalog.map((concept) => {
-    const related = signals.filter((signal) => signal.conceptSlug === concept.slug);
-    const recent = related.filter((signal) => now - dateValue(signal.publishedAt) <= 30 * 86_400_000).length;
-    const temperature = Math.max(20, Math.min(96, concept.baseTemperature + Math.min(20, recent * 4) - (related.length ? 0 : 12)));
-    return {
-      slug: concept.slug,
-      name: concept.name,
-      definition: concept.definition,
-      stage: related[0]?.stage || concept.stage,
-      temperature,
-      relation: concept.relation,
-      signalCount: related.length,
-    };
-  }).sort((left, right) => right.temperature - left.temperature);
+async function buildConcepts(signals, database) {
+  const stored = listConceptKnowledge(database);
+  if (stored.length) {
+    return stored
+      .map((entry) => entry.concept)
+      .filter((concept) => !["candidate", "archived"].includes(String(concept.stage || "").toLowerCase()))
+      .map((concept) => {
+        const related = signals.filter((signal) => signal.conceptSlug === concept.slug);
+        return {
+          ...concept,
+          name: concept.canonicalName || concept.name || concept.slug,
+          temperature: Number(concept.heat || 0),
+          relation: concept.relations?.[0]?.explanation || "证据关系持续修订",
+          signalCount: related.length,
+        };
+      })
+      .sort((left, right) => Number(right.heat || 0) - Number(left.heat || 0)
+        || Number(right.maturity || 0) - Number(left.maturity || 0)
+        || String(left.name).localeCompare(String(right.name)));
+  }
+  return [];
+}
+
+function buildStoredCandidateConcepts(database) {
+  return listConceptKnowledge(database)
+    .map((entry) => entry.concept)
+    .filter((concept) => concept.stage === "candidate")
+    .map((concept) => {
+      const sources = (concept.evidence || []).slice(0, 24).map((evidence) => ({
+        name: evidence.sourceName,
+        href: evidence.url,
+        layer: evidence.sourceLayer,
+        independentGroup: evidence.independentGroup,
+        originalTitle: evidence.originalTitle,
+        publishedAt: evidence.publishedAt,
+      }));
+      const candidate = {
+        slug: concept.slug,
+        name: concept.canonicalName || concept.name || concept.slug,
+        aliases: concept.aliases || [],
+        themes: concept.themes || [],
+        stage: "candidate",
+        heat: Number(concept.heat || 0),
+        maturity: Number(concept.maturity || 0),
+        definition: concept.definition,
+        nonDefinition: concept.nonDefinition,
+        problem: concept.problem,
+        whyNow: concept.whyNow,
+        mechanism: concept.mechanism,
+        dailyDelta: concept.dailyDelta,
+        identityDecision: concept.identityDecision,
+        revisions: concept.revisions || [],
+        latestRevision: concept.revisions?.[0],
+        signalCount: 0,
+        evidenceCount: sources.length,
+        highestEvidenceLayer: highestCandidateEvidenceLayer(sources),
+        lastSeenAt: concept.lastMeaningfulChange,
+        sources,
+      };
+      return enrichCandidate(candidate);
+    });
 }
 
 function mapSources(rows) {
@@ -301,6 +401,7 @@ function mapSources(rows) {
       cadence: source.cadence,
       status,
       focus: source.focus,
+      contentRoles: safeJsonArray(source.content_roles_json),
       href: source.homepage,
       lastAttemptAt: source.last_attempt_at,
       lastSuccessAt: source.last_success_at,
@@ -414,7 +515,11 @@ function buildCandidateConcepts(rows) {
     if (!name || row.publish_decision === "reject") continue;
     const key = name.toLocaleLowerCase();
     const candidate = candidates.get(key) || {
+      slug: stableCandidateSlug(name),
       name,
+      aliases: [name],
+      themes: [],
+      stage: "candidate",
       signalSlugs: new Set(),
       sources: new Map(),
       lastSeenAt: eventAt(row),
@@ -425,6 +530,7 @@ function buildCandidateConcepts(rows) {
         name: row.source_name,
         href: row.url,
         layer: sourceLayer(row),
+        independentGroup: row.independent_group || row.source_id,
         language: inferLanguage(row),
         originalTitle: row.original_title,
         publishedAt: eventAt(row),
@@ -439,17 +545,147 @@ function buildCandidateConcepts(rows) {
       return layerWeight(right.layer) - layerWeight(left.layer)
         || dateValue(right.publishedAt) - dateValue(left.publishedAt);
     });
-    return {
+    return enrichCandidate({
+      slug: candidate.slug,
       name: candidate.name,
+      aliases: candidate.aliases,
+      themes: candidate.themes,
+      stage: "candidate",
       signalCount: candidate.signalSlugs.size,
       evidenceCount: sources.length,
-      highestEvidenceLayer: sources[0]?.layer || "community",
+      highestEvidenceLayer: highestCandidateEvidenceLayer(sources),
       lastSeenAt: candidate.lastSeenAt,
       sources: sources.slice(0, 8),
-    };
+    });
   }).sort((left, right) => dateValue(right.lastSeenAt) - dateValue(left.lastSeenAt)
     || right.evidenceCount - left.evidenceCount
     || left.name.localeCompare(right.name));
+}
+
+function stableCandidateSlug(name) {
+  const ascii = String(name || "")
+    .normalize("NFKD")
+    .toLocaleLowerCase("en-US")
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 72)
+    .replace(/-+$/gu, "");
+  if (ascii.length >= 3) return ascii;
+  const digest = createHash("sha256").update(String(name || "candidate").normalize("NFKC")).digest("hex").slice(0, 12);
+  return `candidate-${digest}`;
+}
+
+function highestCandidateEvidenceLayer(sources) {
+  if (sources.some((source) => source.layer === "official")) return "official";
+  if (sources.some((source) => source.layer === "practitioner")) return "practitioner";
+  return "community";
+}
+
+function enrichCandidate(candidate) {
+  const groups = new Set(candidate.sources.map((source) => source.independentGroup).filter(Boolean));
+  const evidenceLayers = [...new Set(candidate.sources.map((source) => source.layer).filter(Boolean))];
+  const hasDefinition = Boolean(candidate.definition?.trim() && candidate.nonDefinition?.trim() && candidate.mechanism?.trim());
+  const hasPracticeEvidence = candidate.sources.some((source) => source.layer === "practitioner");
+  const identity = candidate.identityDecision;
+  const distinctStatus = identity?.action === "create-new" && Number(identity.confidence || 0) >= 0.8
+    ? "ready"
+    : "review";
+  return {
+    ...candidate,
+    independentSourceGroups: groups.size,
+    evidenceLayers,
+    promotionCriteria: [
+      {
+        key: "stable-definition",
+        label: "稳定定义",
+        status: hasDefinition ? "ready" : "missing",
+        detail: hasDefinition ? "定义、非定义边界与机制已形成可审查版本。" : "仍缺少定义、非定义边界或机制证据。",
+      },
+      {
+        key: "independent-sources",
+        label: "独立来源",
+        status: groups.size >= 2 ? "ready" : "missing",
+        detail: groups.size >= 2 ? `已有 ${groups.size} 个独立来源组。` : `当前只有 ${groups.size} 个独立来源组，尚不能交叉验证。`,
+      },
+      {
+        key: "practice-evidence",
+        label: "实践证据",
+        status: hasPracticeEvidence ? "ready" : "missing",
+        detail: hasPracticeEvidence ? "已有独立实践者材料。" : "仍缺少独立实践者的实现或复盘材料。",
+      },
+      {
+        key: "distinct-identity",
+        label: "与现有概念区分",
+        status: distinctStatus,
+        detail: distinctStatus === "ready" ? identity.reason : "概念边界仍需与已有正式知识逐项比较确认。",
+      },
+    ],
+  };
+}
+
+function candidateIdentityKeys(candidate) {
+  return new Set([
+    candidate.slug,
+    candidate.name,
+    ...(candidate.aliases || []),
+  ].map(normalizeConceptAliasKey).filter(Boolean));
+}
+
+function mergeCandidateConcepts(storedCandidates, articleCandidates) {
+  const merged = storedCandidates.map((candidate) => structuredClone(candidate));
+  for (const incoming of articleCandidates) {
+    const incomingKeys = candidateIdentityKeys(incoming);
+    const index = merged.findIndex((candidate) => {
+      const keys = candidateIdentityKeys(candidate);
+      return [...incomingKeys].some((key) => keys.has(key));
+    });
+    if (index < 0) {
+      merged.push(incoming);
+      continue;
+    }
+    const current = merged[index];
+    const sourceByUrl = new Map([...current.sources, ...incoming.sources].map((source) => [source.href, source]));
+    const sources = [...sourceByUrl.values()].sort((left, right) => (
+      layerWeight(right.layer) - layerWeight(left.layer)
+        || dateValue(right.publishedAt) - dateValue(left.publishedAt)
+    ));
+    merged[index] = enrichCandidate({
+      ...incoming,
+      ...current,
+      aliases: [...new Set([...(current.aliases || []), ...(incoming.aliases || []), incoming.name])],
+      signalCount: Number(current.signalCount || 0) + Number(incoming.signalCount || 0),
+      evidenceCount: sources.length,
+      highestEvidenceLayer: highestCandidateEvidenceLayer(sources),
+      lastSeenAt: dateValue(incoming.lastSeenAt) > dateValue(current.lastSeenAt) ? incoming.lastSeenAt : current.lastSeenAt,
+      sources: sources.slice(0, 24),
+    });
+  }
+  return merged.sort((left, right) => dateValue(right.lastSeenAt) - dateValue(left.lastSeenAt)
+    || right.evidenceCount - left.evidenceCount
+    || left.name.localeCompare(right.name));
+}
+
+function formalConceptIdentityKeys(concepts, conceptRedirects) {
+  const keys = new Set();
+  const add = (value) => {
+    const key = normalizeConceptAliasKey(value);
+    if (key) keys.add(key);
+  };
+  for (const concept of concepts) {
+    add(concept.slug);
+    add(concept.canonicalName);
+    add(concept.name);
+    for (const alias of concept.aliases || []) add(alias);
+  }
+  for (const legacySlug of Object.keys(conceptRedirects || {})) add(legacySlug);
+  return keys;
+}
+
+function excludePromotedCandidateConcepts(candidates, concepts, conceptRedirects) {
+  const formalKeys = formalConceptIdentityKeys(concepts, conceptRedirects);
+  return candidates.filter((candidate) => (
+    ![...candidateIdentityKeys(candidate)].some((key) => formalKeys.has(key))
+  ));
 }
 
 async function buildModelPulses(rows) {
@@ -513,6 +749,7 @@ export async function buildSnapshot(database) {
   const configuredProvider = latestRun?.configured_provider || "rules";
   const runAnalysisMode = latestRun?.analysis_mode || "none";
   const modelLandscapeState = getModelLandscapeState(database);
+  const conceptReadinessState = getConceptPublicationReadiness(database);
   const publicSignals = signals.map((signal) => {
     const publicSignal = {
       ...signal,
@@ -529,8 +766,19 @@ export async function buildSnapshot(database) {
     delete publicSignal.relevanceScore;
     return publicSignal;
   });
+  const concepts = await buildConcepts(signals, database);
+  const conceptRedirects = listConceptRedirects(database);
+  const storedCandidates = buildStoredCandidateConcepts(database);
+  const articleCandidates = buildCandidateConcepts(candidateRows);
+  const candidateConcepts = excludePromotedCandidateConcepts(
+    mergeCandidateConcepts(storedCandidates, articleCandidates),
+    concepts,
+    conceptRedirects,
+  );
+  const storedRelations = buildStoredConceptRelations(database);
   return {
     version: 1,
+    knowledgeSchemaVersion: 1,
     status: {
       mode: articleRows.length ? "live" : "seed",
       generatedAt: new Date().toISOString(),
@@ -548,19 +796,30 @@ export async function buildSnapshot(database) {
       sourceGroupCoverage: coverage.independentGroups,
       signalCount: signals.length,
       articleCount: getArticleCount(database),
+      conceptReadiness: {
+        status: conceptReadinessState.status,
+        formalConceptCount: conceptReadinessState.formalConceptCount,
+        candidateConceptCount: conceptReadinessState.candidateConceptCount,
+        pendingArticleCount: conceptReadinessState.pendingArticleCount,
+        failedArticleCount: conceptReadinessState.failedArticleCount,
+        recentFailures: conceptReadinessState.recentFailures,
+        corruptConceptCount: conceptReadinessState.corruptConceptCount,
+        recoveredConceptCount: conceptReadinessState.recoveredConceptCount,
+      },
       stale: !lastSuccessfulAt || Date.now() - dateValue(lastSuccessfulAt) > 12 * 3_600_000,
     },
     signals: publicSignals,
     discussionPulses,
-    concepts: await buildConcepts(signals),
-    candidateConcepts: buildCandidateConcepts(candidateRows),
+    concepts,
+    conceptRedirects,
+    candidateConcepts,
     modelPulses: await buildModelPulses(articleRows),
     modelLandscape: {
       ...modelLandscapeState,
       stale: !modelLandscapeState.lastSuccessAt || Date.now() - dateValue(modelLandscapeState.lastSuccessAt) > 48 * 3_600_000,
     },
     sources,
-    relations: RELATIONS,
+    relations: storedRelations,
     playbooks: PLAYBOOKS,
     digests: buildDigests(signals),
   };
@@ -581,6 +840,7 @@ export async function writeSnapshotAtomic(snapshot) {
   const readinessDatabase = openDatabase();
   try {
     assertPublicEditorialReady(readinessDatabase);
+    assertConceptPublicationReady(readinessDatabase, snapshot);
   } finally {
     readinessDatabase.close();
   }

@@ -45,7 +45,13 @@ function labelLines(name: string) {
   return [words.slice(0, splitAt).join(" "), words.slice(splitAt).join(" ")];
 }
 
-export function ConceptGraph({ relations }: { relations: GraphRelation[] }) {
+export function ConceptGraph({
+  relations,
+  conceptSlugs,
+}: {
+  relations: GraphRelation[];
+  conceptSlugs: Record<string, string>;
+}) {
   const layout = buildGraphLayout(relations) as GraphLayout;
 
   return (
@@ -82,7 +88,7 @@ export function ConceptGraph({ relations }: { relations: GraphRelation[] }) {
         <g className="graph-nodes">
           {layout.nodes.map((node) => {
             const lines = labelLines(node.name);
-            return (
+            const graphic = (
               <g className={`graph-node graph-node-${nodeTone(node.name)}`} data-graph-node={node.name} transform={`translate(${node.x} ${node.y})`} key={node.name}>
                 <ellipse rx={node.rx} ry={node.ry} />
                 <text textAnchor="middle">
@@ -92,6 +98,12 @@ export function ConceptGraph({ relations }: { relations: GraphRelation[] }) {
                 </text>
               </g>
             );
+            const slug = conceptSlugs[node.name];
+            return slug ? (
+              <a href={`/concepts/${slug}`} aria-label={`查看概念：${node.name}`} tabIndex={-1} key={node.name}>
+                {graphic}
+              </a>
+            ) : graphic;
           })}
         </g>
       </svg>

@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { normalizeSourceContentRoles } from "./catalog.mjs";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -78,6 +79,7 @@ export function openDatabase() {
       source_layer TEXT,
       source_family TEXT,
       language TEXT,
+      content_roles_json TEXT NOT NULL DEFAULT '[]',
       active INTEGER NOT NULL DEFAULT 1,
       last_attempt_at TEXT,
       last_success_at TEXT,
@@ -94,6 +96,7 @@ export function openDatabase() {
       independent_group TEXT NOT NULL,
       source_layer TEXT,
       source_language TEXT,
+      content_roles_json TEXT NOT NULL DEFAULT '[]',
       engagement_count INTEGER NOT NULL DEFAULT 0,
       original_title TEXT NOT NULL,
       original_excerpt TEXT NOT NULL,
@@ -134,16 +137,231 @@ export function openDatabase() {
       item_count INTEGER NOT NULL DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS concept_knowledge (
+      slug TEXT PRIMARY KEY,
+      canonical_name TEXT NOT NULL,
+      stage TEXT NOT NULL CHECK(stage IN ('candidate', 'emerging', 'validated', 'contested', 'cooling', 'archived')),
+      heat REAL NOT NULL DEFAULT 0 CHECK(heat >= 0 AND heat <= 100),
+      maturity REAL NOT NULL DEFAULT 0 CHECK(maturity >= 0 AND maturity <= 100),
+      current_revision INTEGER NOT NULL DEFAULT 0,
+      payload_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      merged_into TEXT,
+      merge_reason TEXT,
+      merged_at TEXT,
+      FOREIGN KEY(merged_into) REFERENCES concept_knowledge(slug)
+    );
+
+    CREATE TABLE IF NOT EXISTS concept_aliases (
+      alias_key TEXT PRIMARY KEY,
+      alias_text TEXT NOT NULL,
+      concept_slug TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(concept_slug) REFERENCES concept_knowledge(slug) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS concept_revisions (
+      concept_slug TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      previous_revision INTEGER,
+      payload_json TEXT NOT NULL,
+      changed_fields_json TEXT NOT NULL,
+      field_diff_json TEXT NOT NULL DEFAULT '{}',
+      confidence REAL NOT NULL DEFAULT 0,
+      needs_review INTEGER NOT NULL DEFAULT 1,
+      review_reasons_json TEXT NOT NULL DEFAULT '[]',
+      material_change INTEGER NOT NULL DEFAULT 1,
+      delta_json TEXT NOT NULL DEFAULT '{}',
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      change_reason TEXT NOT NULL,
+      analyzed_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(concept_slug, revision),
+      FOREIGN KEY(concept_slug) REFERENCES concept_knowledge(slug) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS concept_revision_claims (
+      concept_slug TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      claim_key TEXT NOT NULL,
+      claim_text TEXT NOT NULL,
+      claim_kind TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      evidence_urls_json TEXT NOT NULL,
+      PRIMARY KEY(concept_slug, revision, claim_key),
+      FOREIGN KEY(concept_slug, revision) REFERENCES concept_revisions(concept_slug, revision) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS concept_revision_evidence (
+      concept_slug TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      evidence_url TEXT NOT NULL,
+      original_title TEXT NOT NULL,
+      source_name TEXT NOT NULL,
+      source_layer TEXT NOT NULL,
+      independent_group TEXT NOT NULL,
+      stance TEXT NOT NULL,
+      published_at TEXT,
+      engagement_count INTEGER NOT NULL DEFAULT 0,
+      supports_json TEXT NOT NULL,
+      PRIMARY KEY(concept_slug, revision, evidence_url),
+      FOREIGN KEY(concept_slug, revision) REFERENCES concept_revisions(concept_slug, revision) ON DELETE CASCADE,
+      FOREIGN KEY(evidence_url) REFERENCES articles(url)
+    );
+
+    CREATE TABLE IF NOT EXISTS concept_revision_relations (
+      concept_slug TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      relation_type TEXT NOT NULL,
+      target_slug TEXT NOT NULL,
+      explanation TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      evidence_urls_json TEXT NOT NULL,
+      PRIMARY KEY(concept_slug, revision, relation_type, target_slug),
+      FOREIGN KEY(concept_slug, revision) REFERENCES concept_revisions(concept_slug, revision) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS concept_revision_citations (
+      concept_slug TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      field_name TEXT NOT NULL,
+      evidence_urls_json TEXT NOT NULL,
+      PRIMARY KEY(concept_slug, revision, field_name),
+      FOREIGN KEY(concept_slug, revision) REFERENCES concept_revisions(concept_slug, revision) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS concept_backfill (
+      article_url TEXT PRIMARY KEY,
+      content_hash TEXT NOT NULL,
+      input_contract_hash TEXT,
+      knowledge_schema_version TEXT NOT NULL DEFAULT 'concept-knowledge-v1',
+      analyzer_version TEXT NOT NULL DEFAULT 'concept-analyzer-v2',
+      status TEXT NOT NULL CHECK(status IN ('completed', 'failed', 'conflict')),
+      attempted_at TEXT NOT NULL,
+      completed_at TEXT,
+      last_error TEXT,
+      concept_slug TEXT,
+      revision INTEGER,
+      current_attempt_id INTEGER,
+      FOREIGN KEY(article_url) REFERENCES articles(url) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS concept_backfill_leases (
+      article_url TEXT PRIMARY KEY,
+      content_hash TEXT NOT NULL,
+      owner_token TEXT NOT NULL,
+      claimed_at TEXT NOT NULL,
+      lease_expires_at TEXT NOT NULL,
+      FOREIGN KEY(article_url) REFERENCES articles(url) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS concept_backfill_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      article_url TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      input_contract_hash TEXT,
+      knowledge_schema_version TEXT NOT NULL,
+      analyzer_version TEXT NOT NULL,
+      owner_token TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('running', 'completed', 'failed', 'conflict', 'superseded')),
+      attempted_at TEXT NOT NULL,
+      completed_at TEXT,
+      last_error TEXT,
+      FOREIGN KEY(article_url) REFERENCES articles(url) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS concept_backfill_outputs (
+      attempt_id INTEGER NOT NULL,
+      output_index INTEGER NOT NULL,
+      concept_slug TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      PRIMARY KEY(attempt_id, concept_slug),
+      UNIQUE(attempt_id, output_index),
+      FOREIGN KEY(attempt_id) REFERENCES concept_backfill_attempts(id) ON DELETE CASCADE,
+      FOREIGN KEY(concept_slug, revision) REFERENCES concept_revisions(concept_slug, revision)
+    );
+
     CREATE INDEX IF NOT EXISTS articles_published_idx ON articles(COALESCE(published_at, discovered_at) DESC);
     CREATE INDEX IF NOT EXISTS articles_signal_idx ON articles(signal_slug);
     CREATE INDEX IF NOT EXISTS articles_concept_idx ON articles(concept_slug);
+    CREATE INDEX IF NOT EXISTS concept_knowledge_stage_idx ON concept_knowledge(stage, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS concept_aliases_slug_idx ON concept_aliases(concept_slug);
+    CREATE INDEX IF NOT EXISTS concept_revisions_time_idx ON concept_revisions(analyzed_at DESC);
+    CREATE INDEX IF NOT EXISTS concept_backfill_status_idx ON concept_backfill(status, attempted_at);
+    CREATE INDEX IF NOT EXISTS concept_backfill_leases_expiry_idx ON concept_backfill_leases(lease_expires_at);
+    CREATE INDEX IF NOT EXISTS concept_backfill_attempts_article_idx ON concept_backfill_attempts(article_url, id DESC);
+    CREATE INDEX IF NOT EXISTS concept_backfill_attempts_boundary_idx ON concept_backfill_attempts(article_url, content_hash, knowledge_schema_version, analyzer_version, status);
+    CREATE INDEX IF NOT EXISTS concept_backfill_outputs_concept_idx ON concept_backfill_outputs(concept_slug, revision);
+
+    CREATE TRIGGER IF NOT EXISTS concept_revisions_no_update
+    BEFORE UPDATE ON concept_revisions
+    BEGIN
+      SELECT RAISE(ABORT, 'concept revisions are append-only');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS concept_revisions_no_delete
+    BEFORE DELETE ON concept_revisions
+    BEGIN
+      SELECT RAISE(ABORT, 'concept revisions are append-only');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS concept_revision_claims_no_update
+    BEFORE UPDATE ON concept_revision_claims
+    BEGIN
+      SELECT RAISE(ABORT, 'concept revision claims are append-only audit records');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS concept_revision_claims_no_delete
+    BEFORE DELETE ON concept_revision_claims
+    BEGIN
+      SELECT RAISE(ABORT, 'concept revision claims are append-only audit records');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS concept_revision_evidence_no_update
+    BEFORE UPDATE ON concept_revision_evidence
+    BEGIN
+      SELECT RAISE(ABORT, 'concept revision evidence is append-only audit data');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS concept_revision_evidence_no_delete
+    BEFORE DELETE ON concept_revision_evidence
+    BEGIN
+      SELECT RAISE(ABORT, 'concept revision evidence is append-only audit data');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS concept_revision_relations_no_update
+    BEFORE UPDATE ON concept_revision_relations
+    BEGIN
+      SELECT RAISE(ABORT, 'concept revision relations are append-only audit records');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS concept_revision_relations_no_delete
+    BEFORE DELETE ON concept_revision_relations
+    BEGIN
+      SELECT RAISE(ABORT, 'concept revision relations are append-only audit records');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS concept_revision_citations_no_update
+    BEFORE UPDATE ON concept_revision_citations
+    BEGIN
+      SELECT RAISE(ABORT, 'concept revision citations are append-only audit records');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS concept_revision_citations_no_delete
+    BEFORE DELETE ON concept_revision_citations
+    BEGIN
+      SELECT RAISE(ABORT, 'concept revision citations are append-only audit records');
+    END;
   `);
   ensureColumn(database, "source_health", "source_layer", "TEXT");
   ensureColumn(database, "source_health", "source_family", "TEXT");
   ensureColumn(database, "source_health", "language", "TEXT");
+  ensureColumn(database, "source_health", "content_roles_json", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(database, "source_health", "active", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(database, "articles", "source_layer", "TEXT");
   ensureColumn(database, "articles", "source_language", "TEXT");
+  ensureColumn(database, "articles", "content_roles_json", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(database, "articles", "engagement_count", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(database, "articles", "publish_decision", "TEXT NOT NULL DEFAULT 'publish'");
   ensureColumn(database, "articles", "editorial_score", "INTEGER NOT NULL DEFAULT 0");
@@ -152,6 +370,24 @@ export function openDatabase() {
   ensureColumn(database, "articles", "evidence_score", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(database, "articles", "event_key", "TEXT");
   ensureColumn(database, "articles", "candidate_concept", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(database, "concept_revisions", "previous_revision", "INTEGER");
+  ensureColumn(database, "concept_revisions", "field_diff_json", "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(database, "concept_revisions", "confidence", "REAL NOT NULL DEFAULT 0");
+  ensureColumn(database, "concept_revisions", "needs_review", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(database, "concept_revisions", "review_reasons_json", "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(database, "concept_revisions", "material_change", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(database, "concept_revisions", "delta_json", "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(database, "concept_backfill", "knowledge_schema_version", "TEXT NOT NULL DEFAULT 'concept-knowledge-v1'");
+  // Existing rows predate analyzer versioning and were produced by the
+  // single-concept extractor. Mark them v1 so the v2 multi-concept analyzer
+  // gets one real migration pass instead of incorrectly treating them as done.
+  ensureColumn(database, "concept_backfill", "analyzer_version", "TEXT NOT NULL DEFAULT 'concept-analyzer-v1'");
+  // This column intentionally has no legacy default: an old completed row did
+  // not record the analyzer's full input, so it must receive one safe
+  // reprocessing pass instead of being declared current by assumption.
+  ensureColumn(database, "concept_backfill", "input_contract_hash", "TEXT");
+  ensureColumn(database, "concept_backfill_attempts", "input_contract_hash", "TEXT");
+  ensureColumn(database, "concept_backfill", "current_attempt_id", "INTEGER");
   migrateRunConfiguredProvider(database);
   database.prepare(`
     INSERT OR IGNORE INTO model_landscape (
@@ -167,8 +403,8 @@ export function upsertSourceCatalog(database, sources) {
   const statement = database.prepare(`
     INSERT INTO source_health (
       source_id, name, homepage, source_class, priority, cadence, focus, independent_group,
-      source_layer, source_family, language, active
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      source_layer, source_family, language, content_roles_json, active
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     ON CONFLICT(source_id) DO UPDATE SET
       name = excluded.name,
       homepage = excluded.homepage,
@@ -180,12 +416,24 @@ export function upsertSourceCatalog(database, sources) {
       source_layer = excluded.source_layer,
       source_family = excluded.source_family,
       language = excluded.language,
+      content_roles_json = excluded.content_roles_json,
       active = 1
+  `);
+  const syncArticleSourceIdentity = database.prepare(`
+    UPDATE articles
+    SET source_name = ?,
+        source_class = ?,
+        independent_group = ?,
+        source_layer = ?,
+        source_language = ?,
+        content_roles_json = ?
+    WHERE source_id = ?
   `);
   database.exec("BEGIN IMMEDIATE");
   try {
     database.exec("UPDATE source_health SET active = 0");
     for (const source of sources) {
+      const contentRolesJson = JSON.stringify(normalizeSourceContentRoles(source.contentRoles));
       statement.run(
         source.id,
         source.name,
@@ -198,6 +446,19 @@ export function upsertSourceCatalog(database, sources) {
         source.layer || null,
         source.family || null,
         source.language || null,
+        contentRolesJson,
+      );
+      // The source catalog is authoritative for evidence identity and duties.
+      // Update historical articles in the same transaction so lifecycle
+      // reprojection never observes a half-corrected organization or layer.
+      syncArticleSourceIdentity.run(
+        source.name,
+        source.class,
+        source.independentGroup,
+        source.layer || null,
+        source.language || null,
+        contentRolesJson,
+        source.id,
       );
     }
     database.exec("COMMIT");
@@ -263,12 +524,12 @@ export function articleExists(database, url) {
 export function insertArticle(database, article) {
   const result = database.prepare(`
     INSERT INTO articles (
-      url, source_id, source_name, source_class, independent_group, source_layer, source_language, engagement_count,
+      url, source_id, source_name, source_class, independent_group, source_layer, source_language, content_roles_json, engagement_count,
       original_title, original_excerpt, content_text, published_at, discovered_at,
       content_hash, relevance_score, signal_slug, concept_slug, title, summary,
       implication, topic, stage, accent, tags_json, analysis_mode, publish_decision,
       editorial_score, ai_relevance_score, novelty_score, evidence_score, event_key, candidate_concept
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(url) DO UPDATE SET
       source_id = excluded.source_id,
       source_name = excluded.source_name,
@@ -276,6 +537,7 @@ export function insertArticle(database, article) {
       independent_group = excluded.independent_group,
       source_layer = excluded.source_layer,
       source_language = excluded.source_language,
+      content_roles_json = excluded.content_roles_json,
       engagement_count = excluded.engagement_count,
       original_title = excluded.original_title,
       original_excerpt = excluded.original_excerpt,
@@ -310,6 +572,7 @@ export function insertArticle(database, article) {
     article.independentGroup,
     article.sourceLayer || null,
     article.sourceLanguage || null,
+    JSON.stringify(normalizeSourceContentRoles(article.contentRoles)),
     Number(article.engagementCount || 0),
     article.originalTitle,
     article.originalExcerpt,
@@ -348,6 +611,7 @@ export function retireWatchedArticle(database, article) {
       independent_group = ?,
       source_layer = ?,
       source_language = ?,
+      content_roles_json = ?,
       engagement_count = ?,
       original_title = ?,
       original_excerpt = ?,
@@ -380,6 +644,7 @@ export function retireWatchedArticle(database, article) {
     article.independentGroup,
     article.sourceLayer || null,
     article.sourceLanguage || null,
+    JSON.stringify(normalizeSourceContentRoles(article.contentRoles)),
     Number(article.engagementCount || 0),
     article.originalTitle,
     article.originalExcerpt,

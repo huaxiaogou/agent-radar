@@ -15,6 +15,18 @@ const JSON_PARSERS = new Set([
 ]);
 const FAMILIES = new Set(["official", "repository", "practitioner", "community", "research"]);
 const HTML_PARSERS = new Set(["claude-changelog"]);
+export const SOURCE_CONTENT_ROLES = Object.freeze([
+  "podcast-transcript",
+  "interview",
+  "engineering-postmortem",
+]);
+const CONTENT_ROLES = new Set(SOURCE_CONTENT_ROLES);
+
+export function normalizeSourceContentRoles(value) {
+  if (!Array.isArray(value)) return [];
+  const requested = new Set(value.filter((role) => typeof role === "string"));
+  return SOURCE_CONTENT_ROLES.filter((role) => requested.has(role));
+}
 
 function assertPublicHttpsUrl(value, label) {
   let url;
@@ -53,6 +65,18 @@ function validatePatterns(patterns, label) {
   }
 }
 
+function validateContentRoles(value, label) {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) throw new Error(`${label} contentRoles 必须是受控数组`);
+  if (value.length > SOURCE_CONTENT_ROLES.length) throw new Error(`${label} contentRoles 数量超过受控目录`);
+  const seen = new Set();
+  for (const role of value) {
+    if (!CONTENT_ROLES.has(role)) throw new Error(`${label} contentRole 无效：${role || "空"}`);
+    if (seen.has(role)) throw new Error(`${label} contentRole 重复：${role}`);
+    seen.add(role);
+  }
+}
+
 export function validateSourceCatalog(catalog) {
   if (!Array.isArray(catalog)) throw new Error("config/sources.json 必须是数组");
 
@@ -69,6 +93,7 @@ export function validateSourceCatalog(catalog) {
     for (const key of ["url", "homepage"]) assertPublicHttpsUrl(source[key], `来源 ${source.id} ${key}`);
     validateParser(source.kind, source.parser, `来源 ${source.id}`);
     validatePatterns(source.includeUrlPatterns, `来源 ${source.id}`);
+    validateContentRoles(source.contentRoles, `来源 ${source.id}`);
     if (source.fallbacks !== undefined) {
       if (!Array.isArray(source.fallbacks) || source.fallbacks.length > 8) {
         throw new Error(`来源 ${source.id} fallbacks 必须是至多 8 项的数组`);

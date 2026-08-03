@@ -77,6 +77,93 @@ function persistedArticle(source, overrides = {}) {
   };
 }
 
+function deepSeekRequestText(request) {
+  return String(request.messages?.findLast((message) => message.role === "user")?.content || request.input || "");
+}
+
+function isConceptKnowledgeRequest(request) {
+  const system = String(request.messages?.find((message) => message.role === "system")?.content || request.instructions || "");
+  return system.includes("证据型知识编辑")
+    && system.includes("输出 concepts 数组");
+}
+
+function conceptSourceFromRequest(request) {
+  const input = deepSeekRequestText(request);
+  const match = input.match(/<untrusted-source>\s*(\{[\s\S]*?\})\s*<\/untrusted-source>/u);
+  assert.ok(match, "概念知识请求必须保留边界明确的原始来源对象，测试才能验证它没有分析门禁外文章");
+  return JSON.parse(match[1]);
+}
+
+function conceptKnowledgeAnalysis(source) {
+  const isResearch = /papers|dblp/u.test(source.url);
+  const slug = isResearch ? "reliable-coding-agents-under-tool-failures" : "build-queue-replacement-workflow";
+  const claimKey = isResearch ? "tool-failure-recovery-observation" : "build-queue-workflow-observation";
+  const concept = {
+    slug,
+    canonicalName: isResearch ? "工具故障下的代码智能体可靠性" : "构建队列替代工作流",
+    aliases: [],
+    themes: isResearch
+      ? ["evaluation-verification", "durable-execution"]
+      : ["ai-coding-engineering", "agent-runtime"],
+    stage: "candidate",
+    heat: 64,
+    maturity: 18,
+    definition: isResearch
+      ? "该候选概念关注代码智能体遭遇工具故障时，如何记录失败并恢复尚未完成的工程步骤。"
+      : "该候选概念描述开发者以新的执行工作流替代传统构建队列，并观察任务调度行为的变化。",
+    nonDefinition: "它目前只是需要继续验证的工程线索，不能代表已经形成行业共识或成熟实践。",
+    problem: "当前单一来源只能说明相关工程现象已经出现，仍不足以确定它的适用边界和可重复效果。",
+    whyNow: "近期材料提供了新的实现观察，因此值得保留原始证据并寻找跨来源复现与边界说明。",
+    origin: "现有证据只支持本站首次观察到该工程线索，命名起源与思想来源仍有待继续溯源。",
+    evolution: [],
+    mechanism: "现有材料描述了工作流中的执行与恢复行为，但具体状态转换、失败处理和验收机制仍需更多证据。",
+    architecture: "目前只能确认材料涉及任务执行与工具交互，完整的控制面、状态层和验证层结构尚未得到证明。",
+    designConstraints: [],
+    implementationPatterns: [],
+    antiPatterns: [],
+    tradeoffs: [],
+    failureModes: [],
+    securityRisks: [],
+    operationalConcerns: [],
+    applicability: [],
+    nonApplicability: [],
+    controversies: [],
+    dailyDelta: "本次仅新增一条值得跟踪的候选证据，尚未形成可公开确认的成熟概念。",
+    lastMeaningfulChange: new Date().toISOString(),
+  };
+  const citedFields = ["definition", "nonDefinition", "problem", "whyNow", "origin", "mechanism", "architecture", "dailyDelta"];
+  return {
+    identityDecision: {
+      action: "create-new",
+      canonicalSlug: slug,
+      confidence: 0.91,
+      reason: "当前候选描述了可独立命名、实现和继续验证的工程机制，且与已知概念不存在精确身份冲突。",
+      comparedSlugs: ["coding-agent", "agent-harness"],
+    },
+    concept,
+    claims: [{
+      key: claimKey,
+      text: isResearch
+        ? "该材料研究了代码智能体在工具故障条件下的恢复行为。"
+        : "该讨论报告了以新工作流替代构建队列的工程观察。",
+      kind: isResearch ? "mechanism" : "pattern",
+      confidence: 0.62,
+    }],
+    evidence: [{
+      url: source.url,
+      originalTitle: source.originalTitle,
+      sourceName: source.sourceName,
+      sourceLayer: source.sourceLayer,
+      independentGroup: source.independentGroup,
+      supports: [claimKey],
+      stance: "support",
+      publishedAt: source.publishedAt,
+    }],
+    citations: citedFields.map((field) => ({ field, evidenceUrls: [source.url] })),
+    relations: [],
+  };
+}
+
 test("source catalog covers five discovery families and the critical coding, agent, community and research landscape", async () => {
   const rawCatalog = JSON.parse(await readFile(new URL("../config/sources.json", import.meta.url), "utf8"));
   const catalog = rawCatalog.filter((source) => source.enabled !== false);
@@ -155,6 +242,51 @@ test("catalog validation requires every source to declare its discovery family e
     layer: "official",
     language: "en",
   }]), /family/u, "family 是来源职责，不得按 Evidence Layer 静默猜测");
+});
+
+test("source catalog statically declares controlled long-form engineering content roles", async () => {
+  const { loadSourceCatalog, validateSourceCatalog } = await import("../radar/catalog.mjs");
+  const requiredRoles = ["podcast-transcript", "interview", "engineering-postmortem"];
+  const catalog = await loadSourceCatalog();
+  const coveredRoles = new Set(catalog.flatMap((source) => source.contentRoles || []));
+
+  for (const role of requiredRoles) {
+    assert.ok(
+      coveredRoles.has(role),
+      `启用来源目录必须显式覆盖 ${role}，不能依赖 name/focus 文案让运行时猜测长内容职责`,
+    );
+    assert.ok(
+      catalog.some((source) => source.contentRoles?.includes(role) && source.family === "practitioner"),
+      `${role} 至少需要一个实践者来源承担该职责，新闻、Release 或社区热帖不能替代长篇工程材料`,
+    );
+  }
+
+  const validRoleSource = {
+    id: "long-form-role-contract",
+    name: "Long-form Role Contract",
+    url: "https://example.com/feed.xml",
+    homepage: "https://example.com/",
+    kind: "feed",
+    layer: "practitioner",
+    family: "practitioner",
+    language: "en",
+    contentRoles: requiredRoles,
+  };
+  assert.deepEqual(
+    validateSourceCatalog([validRoleSource])[0].contentRoles,
+    requiredRoles,
+    "目录解析必须保留受控 contentRoles，供覆盖审计与后续精排使用",
+  );
+  assert.throws(
+    () => validateSourceCatalog([{ ...validRoleSource, contentRoles: ["marketing-roundup"] }]),
+    /content.?role|内容职责|marketing-roundup/iu,
+    "未知内容职责必须在静态目录门禁被拒绝，不能悄悄变成无法审计的自由文本",
+  );
+  assert.throws(
+    () => validateSourceCatalog([{ ...validRoleSource, contentRoles: "interview" }]),
+    /content.?role|内容职责/iu,
+    "contentRoles 必须是受控数组，不能让单值字符串被逐字符解析",
+  );
 });
 
 function crewaiBlogUrl(source) {
@@ -267,11 +399,20 @@ test("manual production ingestion sends only the high-engagement generic discuss
       return new Response(emptyFeed(), { status: 200, headers: { "content-type": "application/rss+xml" } });
     };
 
-    const analyzedInputs = [];
+    const editorialInputs = [];
+    const conceptSources = [];
     globalThis.fetch = async (_input, init) => {
       const request = JSON.parse(init.body);
-      const text = String(request.messages?.at(-1)?.content || request.input || "");
-      analyzedInputs.push(text);
+      const text = deepSeekRequestText(request);
+      if (isConceptKnowledgeRequest(request)) {
+        const source = conceptSourceFromRequest(request);
+        conceptSources.push(source);
+        return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(conceptKnowledgeAnalysis(source)) } }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      editorialInputs.push(text);
       const isPaper = /Daily Papers|2608\.00001|Reliable Coding Agents/i.test(text);
       const analysis = chineseWatchAnalysis(
         isPaper ? "工具失败下的可靠代码智能体" : "构建队列替代工作流",
@@ -297,8 +438,17 @@ test("manual production ingestion sends only the high-engagement generic discuss
     });
     assert.equal(result.acceptedCount, 0, "规则相关性为零的 exploration candidate 不能因模型返回 publish 而公开");
     assert.equal(result.watchedCount, 2, "模型误判 publish 的 exploration candidate 必须被强制降为 watch");
-    assert.equal(analyzedInputs.length, 2, "低互动泛 AI 不得调用 LLM，高互动无关键词候选和研究候选必须调用");
-    assert.ok(!analyzedInputs.some((input) => /互动量|engagementCount|\b420\b/.test(input)), "互动量只负责打开探索门，不得进入 LLM 输入影响发布判断");
+    assert.equal(editorialInputs.length, 2, "低互动泛 AI 不得调用文章编辑 LLM，高互动无关键词候选和研究候选必须调用");
+    assert.ok(editorialInputs.some((input) => input.includes("Show HN: We replaced the build queue")), "高互动 HN 讨论必须进入文章编辑分析");
+    assert.ok(editorialInputs.some((input) => input.includes("Reliable Coding Agents Under Tool Failures")), "新研究必须进入文章编辑分析");
+    assert.ok(!editorialInputs.some((input) => input.includes("A generic AI assistant launch")), "低互动泛 AI 不得进入文章编辑分析");
+    assert.ok(!editorialInputs.some((input) => /互动量|engagementCount|\b420\b/.test(input)), "互动量只负责打开探索门，不得进入 LLM 输入影响发布判断");
+    assert.deepEqual(
+      conceptSources.map((source) => source.url).sort(),
+      [highHnUrl, paperUrl].sort(),
+      "概念知识分析只能消费已经通过发现门禁并持久化的两条文章，不能把低互动泛 AI 带入下游",
+    );
+    assert.ok(!conceptSources.some((source) => source.url === lowHnUrl || /generic AI assistant launch/i.test(source.originalTitle)), "低互动泛 AI 不得进入概念知识分析");
 
     const { openDatabase } = await import("../radar/database.mjs");
     const database = openDatabase();
@@ -419,11 +569,20 @@ test("manual ingestion sends a year-only DBLP publication through the production
       return new Response(emptyFeed(), { status: 200, headers: { "content-type": "application/rss+xml" } });
     };
 
-    const analyzedInputs = [];
+    const editorialInputs = [];
+    const conceptSources = [];
     globalThis.fetch = async (_input, init) => {
       const request = JSON.parse(init.body);
-      const text = String(request.messages?.at(-1)?.content || request.input || "");
-      analyzedInputs.push(text);
+      const text = deepSeekRequestText(request);
+      if (isConceptKnowledgeRequest(request)) {
+        const source = conceptSourceFromRequest(request);
+        conceptSources.push(source);
+        return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(conceptKnowledgeAnalysis(source)) } }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      editorialInputs.push(text);
       const analysis = chineseWatchAnalysis("年份精度不足但值得分析的研究", "research:dblp-year-only");
       return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(analysis) } }] }), {
         status: 200,
@@ -439,8 +598,9 @@ test("manual ingestion sends a year-only DBLP publication through the production
       modelLandscapeFetcher: async () => [],
     });
     assert.equal(result.fetchedCount, 1, "DBLP collector 应发现 year-only 研究记录");
-    assert.equal(analyzedInputs.length, 1, "year-only DBLP 记录不得被 120 天年龄门禁提前淘汰");
-    assert.match(analyzedInputs[0], /Agentic Coding Agents with Tool Orchestration/u);
+    assert.equal(editorialInputs.length, 1, "year-only DBLP 记录不得被 120 天年龄门禁提前淘汰");
+    assert.match(editorialInputs[0], /Agentic Coding Agents with Tool Orchestration/u);
+    assert.deepEqual(conceptSources.map((source) => source.url), [paperUrl], "year-only DBLP 通过文章门禁后，概念知识阶段只能分析这一条已持久化研究");
     assert.equal(result.watchedCount, 1, "通过年龄门禁后的研究应进入正式候选分析与 watch 持久化阶段");
   } finally {
     globalThis.fetch = previousFetch;

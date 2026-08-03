@@ -11,6 +11,12 @@ const FAMILY_LABELS = {
   research: "研究",
 } as const;
 
+const CONTENT_ROLE_LABELS = {
+  "podcast-transcript": "播客文字稿",
+  interview: "深度访谈",
+  "engineering-postmortem": "工程复盘",
+} as const;
+
 export default async function SourcesPage() {
   const snapshot = await getRadarSnapshot();
   const { sources, status } = snapshot;
@@ -37,7 +43,7 @@ export default async function SourcesPage() {
         {sources.map((source) => (
           <a className="source-row" href={source.href} target="_blank" rel="noreferrer" key={source.name}>
             <strong>{source.name}<small>{new URL(source.href).hostname}</small></strong>
-            <span>{source.family ? FAMILY_LABELS[source.family] : "官方"}</span><span>{source.layer === "official" ? "官方" : source.layer === "practitioner" ? "实践者" : source.layer === "community" ? "社区" : source.class}{source.language ? ` · ${source.language === "zh" ? "中文" : "英文"}` : ""}</span><span className="source-priority">{source.priority}</span><span className="source-cadence">{source.cadence}</span><span>{source.focus}</span><span className={`source-status status-${source.status}`} title={source.lastError || source.lastSuccessAt || undefined}><i />{source.status}</span>
+            <span>{source.family ? FAMILY_LABELS[source.family] : "官方"}</span><span>{source.layer === "official" ? "官方" : source.layer === "practitioner" ? "实践者" : source.layer === "community" ? "社区" : source.class}{source.language ? ` · ${source.language === "zh" ? "中文" : "英文"}` : ""}</span><span className="source-priority">{source.priority}</span><span className="source-cadence">{source.cadence}</span><span>{source.focus}{Boolean(source.contentRoles?.length) && <small>内容职责：{source.contentRoles?.map((role) => CONTENT_ROLE_LABELS[role]).join(" · ")}</small>}</span><span className={`source-status status-${source.status}`} title={source.lastError || source.lastSuccessAt || undefined}><i />{source.status}</span>
           </a>
         ))}
       </section>

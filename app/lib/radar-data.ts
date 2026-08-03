@@ -5,6 +5,7 @@ export type EvidenceNode = {
 
 export type SourceLayer = "official" | "practitioner" | "community";
 export type SourceFamily = "official" | "repository" | "practitioner" | "community" | "research";
+export type SourceContentRole = "podcast-transcript" | "interview" | "engineering-postmortem";
 
 export type SignalHeat = {
   engagement: number;
@@ -18,6 +19,7 @@ export type SignalSource = {
   name: string;
   href: string;
   layer?: SourceLayer;
+  independentGroup?: string;
   language?: "zh" | "en" | "mixed";
   originalTitle?: string;
   publishedAt?: string;
@@ -71,15 +73,151 @@ export type Concept = {
   temperature: number;
   relation: string;
   signalCount?: number;
+  canonicalName?: string;
+  aliases?: string[];
+  themes?: string[];
+  heat?: number;
+  maturity?: number;
+  revision?: number;
+  nonDefinition?: string;
+  problem?: string;
+  whyNow?: string;
+  origin?: string;
+  evolution?: string[];
+  mechanism?: string;
+  architecture?: string;
+  designConstraints?: string[];
+  implementationPatterns?: string[];
+  antiPatterns?: string[];
+  tradeoffs?: string[];
+  failureModes?: string[];
+  securityRisks?: string[];
+  operationalConcerns?: string[];
+  applicability?: string[];
+  nonApplicability?: string[];
+  controversies?: string[];
+  dailyDelta?: string;
+  lastMeaningfulChange?: string | null;
+  createdAt?: string;
+  claims?: ConceptClaim[];
+  evidence?: ConceptEvidence[];
+  citations?: ConceptCitation[];
+  knowledgeRelations?: ConceptRelation[];
+  relationships?: ConceptRelation[];
+  relations?: ConceptRelation[];
+  revisions?: ConceptRevision[];
+  provider?: string;
+  model?: string;
+  changeReason?: string;
+  independentSourceGroups?: number;
+  identityDecision?: ConceptIdentityDecision;
+};
+
+export type ConceptIdentityDecision = {
+  action: "reuse-existing" | "create-new" | "needs-review";
+  canonicalSlug: string;
+  confidence: number;
+  reason: string;
+  comparedSlugs: string[];
+};
+
+export type ConceptCitation = {
+  field: string;
+  evidenceUrls: string[];
+};
+
+export type ConceptClaim = {
+  key: string;
+  text: string;
+  kind: string;
+  confidence: number;
+  evidenceUrls: string[];
+};
+
+export type ConceptEvidence = {
+  url: string;
+  originalTitle: string;
+  sourceName: string;
+  sourceLayer: SourceLayer;
+  independentGroup?: string;
+  supports: string[];
+  stance: "support" | "conflict" | "context" | string;
+  publishDecision?: "publish" | "watch" | "reject";
+  publishedAt?: string | null;
+};
+
+export type ConceptRelation = {
+  type: string;
+  relationType?: string;
+  targetSlug?: string;
+  explanation?: string;
+  confidence?: number;
+  fromSlug?: string;
+  toSlug?: string;
+  from?: string;
+  to?: string;
+  note?: string;
+  evidenceUrls?: string[];
+};
+
+export type PublicConceptRelation = {
+  from: string;
+  type: string;
+  relationType?: string;
+  to: string;
+  note: string;
+  evidenceUrls?: string[];
+  confidence?: number;
+};
+
+export type ConceptRevision = {
+  revision: number;
+  previousRevision?: number | null;
+  analyzedAt?: string;
+  createdAt?: string;
+  provider: string;
+  model?: string;
+  reason?: string;
+  changeReason?: string;
+  changedFields?: string[];
+  fieldDiff?: Record<string, { before: unknown; after: unknown }>;
+  confidence?: number;
+  needsReview?: boolean;
+  reviewReasons?: string[];
+  materialChange?: boolean;
+  delta?: { materialChange?: boolean; categories?: string[] };
 };
 
 export type CandidateConcept = {
+  slug: string;
   name: string;
+  aliases?: string[];
+  themes?: string[];
+  stage: "candidate";
+  heat?: number;
+  maturity?: number;
+  definition?: string;
+  nonDefinition?: string;
+  problem?: string;
+  whyNow?: string;
+  mechanism?: string;
+  dailyDelta?: string;
+  identityDecision?: ConceptIdentityDecision;
+  revisions?: ConceptRevision[];
+  latestRevision?: ConceptRevision;
+  independentSourceGroups?: number;
+  evidenceLayers?: SourceLayer[];
+  promotionCriteria?: Array<{
+    key: "stable-definition" | "independent-sources" | "practice-evidence" | "distinct-identity";
+    label: string;
+    status: "ready" | "missing" | "review";
+    detail: string;
+  }>;
   signalCount: number;
   evidenceCount: number;
   highestEvidenceLayer: SourceLayer;
   lastSeenAt: string;
-  sources: Array<SignalSource & { layer: SourceLayer }>;
+  sources: Array<SignalSource & { layer: SourceLayer; independentGroup?: string }>;
 };
 
 export type RadarSource = {
@@ -99,6 +237,7 @@ export type RadarSource = {
   family?: SourceFamily;
   independentGroup?: string;
   language?: "zh" | "en" | "mixed";
+  contentRoles?: SourceContentRole[];
 };
 
 export type ModelPulseWindow = Record<SourceLayer, number> & { total: number };
@@ -171,7 +310,23 @@ export type RadarStatus = {
   sourceGroupCoverage: { configured: number; available: number; effective: number };
   signalCount: number;
   articleCount: number;
+  conceptReadiness?: ConceptReadiness;
   stale: boolean;
+};
+
+export type ConceptReadiness = {
+  status: "ok" | "warning" | "not-ready" | "unknown";
+  formalConceptCount: number;
+  candidateConceptCount: number;
+  pendingArticleCount: number | null;
+  failedArticleCount: number | null;
+  recentFailures: Array<{
+    articleUrl: string;
+    status: string;
+    attemptedAt: string | null;
+  }>;
+  corruptConceptCount: number | null;
+  recoveredConceptCount: number | null;
 };
 
 export function analysisStatusLabel(status: Pick<RadarStatus, "analysisMode"> & Partial<Pick<RadarStatus, "configuredProvider" | "runAnalysisMode">>) {
@@ -205,13 +360,15 @@ export function analysisStatusLabel(status: Pick<RadarStatus, "analysisMode"> & 
 
 export type RadarSnapshot = {
   version: 1;
+  knowledgeSchemaVersion: 1;
   status: RadarStatus;
   signals: Signal[];
   discussionPulses: DiscussionPulse[];
   concepts: Concept[];
+  conceptRedirects: Record<string, { redirectTo: string; reason: string; mergedAt: string }>;
   candidateConcepts: CandidateConcept[];
   sources: RadarSource[];
-  relations: Array<{ from: string; type: string; to: string; note: string }>;
+  relations: PublicConceptRelation[];
   playbooks: Array<{ title: string; description: string; steps: number; maturity: string }>;
   digests: RadarDigest[];
   modelPulses: ModelPulse[];
@@ -460,6 +617,7 @@ export const digests: RadarDigest[] = [
 
 export const seedRadarSnapshot: RadarSnapshot = {
   version: 1,
+  knowledgeSchemaVersion: 1,
   status: {
     mode: "seed",
     generatedAt: "2026-08-01T02:18:00.000Z",
@@ -481,11 +639,22 @@ export const seedRadarSnapshot: RadarSnapshot = {
     sourceGroupCoverage: { configured: 0, available: 0, effective: 0 },
     signalCount: signals.length,
     articleCount: signals.reduce((total, signal) => total + signal.evidenceCount, 0),
+    conceptReadiness: {
+      status: "unknown",
+      formalConceptCount: concepts.length,
+      candidateConceptCount: 0,
+      pendingArticleCount: null,
+      failedArticleCount: null,
+      recentFailures: [],
+      corruptConceptCount: null,
+      recoveredConceptCount: null,
+    },
     stale: true,
   },
   signals,
   discussionPulses: [],
   concepts,
+  conceptRedirects: {},
   candidateConcepts: [],
   sources,
   relations,

@@ -3,7 +3,38 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "../components/AppShell";
+import { engineeringThemeSearchTerms } from "../lib/concept-themes";
 import type { Concept, RadarSource, RadarStatus, Signal } from "../lib/radar-data";
+
+function conceptSearchHaystack(concept: Concept) {
+  return [
+    concept.name,
+    concept.canonicalName,
+    concept.definition,
+    concept.nonDefinition,
+    concept.problem,
+    concept.whyNow,
+    concept.origin,
+    concept.mechanism,
+    concept.architecture,
+    concept.dailyDelta,
+    ...(concept.aliases || []),
+    ...engineeringThemeSearchTerms(concept.themes),
+    ...(concept.evolution || []),
+    ...(concept.designConstraints || []),
+    ...(concept.implementationPatterns || []),
+    ...(concept.antiPatterns || []),
+    ...(concept.tradeoffs || []),
+    ...(concept.failureModes || []),
+    ...(concept.securityRisks || []),
+    ...(concept.operationalConcerns || []),
+    ...(concept.applicability || []),
+    ...(concept.nonApplicability || []),
+    ...(concept.controversies || []),
+  ].filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join(" ")
+    .toLocaleLowerCase();
+}
 
 export function SearchView({ initialQuery, signals, concepts, sources, status }: {
   initialQuery?: string;
@@ -16,12 +47,22 @@ export function SearchView({ initialQuery, signals, concepts, sources, status }:
   const normalized = query.trim().toLowerCase();
   const matches = useMemo(() => {
     if (!normalized) return [];
+    const formalConceptSlugs = new Set(concepts
+      .filter((concept) => concept.stage.toLowerCase() !== "candidate")
+      .map((concept) => concept.slug));
     return [
-      ...signals.filter((item) => `${item.title} ${item.summary} ${item.topic} ${item.sources.map((source) => source.originalTitle || "").join(" ")}`.toLowerCase().includes(normalized)).map((item) => ({ type: "SIGNAL", title: item.title, detail: item.summary, href: `/concepts/${item.conceptSlug || item.slug}` })),
+      ...signals.filter((item) => `${item.title} ${item.summary} ${item.topic} ${item.sources.map((source) => source.originalTitle || "").join(" ")}`.toLowerCase().includes(normalized)).map((item) => ({
+        type: "SIGNAL",
+        title: item.title,
+        detail: item.summary,
+        href: item.conceptSlug && formalConceptSlugs.has(item.conceptSlug)
+          ? `/concepts/${item.conceptSlug}`
+          : `/signals#${item.slug}`,
+      })),
       ...signals.flatMap((signal) => signal.sources
         .filter((source) => source.layer === "community" && source.originalTitle?.toLowerCase().includes(normalized))
         .map((source) => ({ type: source.language === "zh" ? "中文讨论" : "EN DISCUSSION", title: source.originalTitle!, detail: signal.implication, href: source.href }))),
-      ...concepts.filter((item) => `${item.name} ${item.definition}`.toLowerCase().includes(normalized)).map((item) => ({ type: "CONCEPT", title: item.name, detail: item.definition, href: `/concepts/${item.slug}` })),
+      ...concepts.filter((item) => formalConceptSlugs.has(item.slug) && conceptSearchHaystack(item).includes(normalized)).map((item) => ({ type: "CONCEPT", title: item.name, detail: item.definition, href: `/concepts/${item.slug}` })),
       ...sources.filter((item) => `${item.name} ${item.focus}`.toLowerCase().includes(normalized)).map((item) => ({ type: "SOURCE", title: item.name, detail: item.focus, href: item.href })),
     ];
   }, [concepts, normalized, signals, sources]);

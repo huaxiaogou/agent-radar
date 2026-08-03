@@ -26,6 +26,9 @@ export function TodayView({ initialTopic, snapshot }: { initialTopic?: string; s
   const router = useRouter();
   const pathname = usePathname();
   const { concepts, signals, status } = snapshot;
+  const conceptSlugs = useMemo(() => new Set(concepts
+    .filter((concept) => concept.stage.toLowerCase() !== "candidate")
+    .map((concept) => concept.slug)), [concepts]);
   const filter = filters.find((item) => item === initialTopic) ?? "全部";
   const filtered = useMemo(
     () => signals.filter((signal) => filter === "全部" || signal.topic === filter),
@@ -74,7 +77,7 @@ export function TodayView({ initialTopic, snapshot }: { initialTopic?: string; s
       {lead ? (
         <div className="radar-layout">
           <div className="signal-column">
-            <SignalCard signal={lead} featured />
+            <SignalCard signal={lead} conceptAvailable={Boolean(lead.conceptSlug && conceptSlugs.has(lead.conceptSlug))} featured />
             {rest.length > 0 && (
               <section className="stream-section">
                 <div className="section-heading">
@@ -82,7 +85,7 @@ export function TodayView({ initialTopic, snapshot }: { initialTopic?: string; s
                   <Link href="/signals">查看全部 <span aria-hidden="true">→</span></Link>
                 </div>
                 <div className="signal-stream">
-                  {rest.map((signal) => <SignalCard signal={signal} key={signal.slug} />)}
+                  {rest.map((signal) => <SignalCard signal={signal} conceptAvailable={Boolean(signal.conceptSlug && conceptSlugs.has(signal.conceptSlug))} key={signal.slug} />)}
                 </div>
               </section>
             )}

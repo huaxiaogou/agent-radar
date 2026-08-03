@@ -2,8 +2,10 @@ import Link from "next/link";
 import type { Signal } from "../lib/radar-data";
 import { EvidencePulse } from "./EvidencePulse";
 
-export function SignalCard({ signal, featured = false }: { signal: Signal; featured?: boolean }) {
-  const analysisHref = `/concepts/${signal.conceptSlug ?? signal.slug}`;
+export function SignalCard({ signal, featured = false, conceptAvailable = false }: { signal: Signal; featured?: boolean; conceptAvailable?: boolean }) {
+  const analysisHref = signal.conceptSlug && conceptAvailable
+    ? `/concepts/${signal.conceptSlug}`
+    : `/signals#${signal.slug}`;
   const primarySource = signal.representativeSource ?? signal.sources[0];
   const verificationCopy = signal.verificationState === "cross-verified"
     ? "官方 + 独立来源交叉验证"
@@ -17,7 +19,7 @@ export function SignalCard({ signal, featured = false }: { signal: Signal; featu
             ? "实践观察 · 等待更多来源"
           : signal.confidence;
   return (
-    <article className={`signal-card accent-${signal.accent}${featured ? " featured" : ""}`}>
+    <article id={signal.slug} className={`signal-card accent-${signal.accent}${featured ? " featured" : ""}`}>
       <div className="card-topline">
         <span className="mono-label">{signal.eyebrow}</span>
         <span className={`stage stage-${signal.stage.toLowerCase()}`}>{signal.stage}</span>

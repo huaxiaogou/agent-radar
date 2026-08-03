@@ -425,6 +425,15 @@ function safeErrorMessage(error, sensitiveValues = []) {
   return message.slice(0, 500);
 }
 
+function safeEnrichmentError(error) {
+  const discoveredCode = nestedErrorCode(error);
+  const code = /^[a-z0-9_. -]{1,64}$/i.test(discoveredCode) ? discoveredCode : "FETCH_ERROR";
+  return {
+    code,
+    message: `详情正文抓取失败（${code}）；已保留来源摘要供降级分析`,
+  };
+}
+
 function endpointDiagnostic(endpoint, error, extraSensitiveValues = []) {
   const sensitiveValues = [...secretValuesFromUrl(endpoint.url), ...extraSensitiveValues];
   return {
@@ -857,15 +866,30 @@ export async function discoverSourceItems(source, fetchOptions = {}) {
 
 export async function enrichItem(item, fetchOptions = {}) {
   if (new URL(item.url).hash && item.excerpt) {
-    return { ...item, contentText: item.excerpt };
+    return {
+      ...item,
+      contentText: item.excerpt,
+      enrichmentStatus: "success",
+      contentCompleteness: "excerpt-only",
+    };
   }
   if (item.excerpt?.length >= 900 && item.publishedAt) {
-    return { ...item, contentText: item.excerpt };
+    return {
+      ...item,
+      contentText: item.excerpt,
+      enrichmentStatus: "success",
+      contentCompleteness: "excerpt-only",
+    };
   }
   try {
     const { body, finalUrl, contentType } = await fetchText(item.url, 1, fetchOptions);
     if (!/html/i.test(contentType) && !/^\s*<!doctype html|^\s*<html/i.test(body)) {
-      return { ...item, contentText: item.excerpt || "" };
+      return {
+        ...item,
+        contentText: item.excerpt || "",
+        enrichmentStatus: "success",
+        contentCompleteness: "excerpt-only",
+      };
     }
     const $ = cheerio.load(body);
     let structuredDate = null;
@@ -897,8 +921,16 @@ export async function enrichItem(item, fetchOptions = {}) {
       excerpt: cleanText(item.excerpt || metaDescription || articleText, 2800),
       contentText: articleText || item.excerpt || metaDescription,
       publishedAt,
+      enrichmentStatus: "success",
+      contentCompleteness: articleText ? "full-text" : "excerpt-only",
     };
-  } catch {
-    return { ...item, contentText: item.excerpt || "" };
+  } catch (error) {
+    return {
+      ...item,
+      contentText: item.excerpt || "",
+      enrichmentStatus: "degraded",
+      contentCompleteness: "excerpt-only",
+      enrichmentError: safeEnrichmentError(error),
+    };
   }
 }

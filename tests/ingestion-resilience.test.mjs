@@ -421,6 +421,178 @@ test("only an exclusive task-lock owner reconciles abandoned running rows before
   }
 });
 
+test("P2 contract: detail enrichment failure keeps the feed excerpt and returns a safe diagnosable degraded state", async () => {
+  const { enrichItem } = await import("../radar/fetch.mjs");
+  const secret = "DETAIL_SUPER_SECRET";
+  const url = `https://content.example.test/agent-harness-postmortem?api_key=${secret}`;
+  const excerpt = "Agent harness postmortem: checkpoint recovery, tool-call permissions, rollback validation and auditable acceptance evidence.";
+  const enriched = await enrichItem({
+    url,
+    title: "Agent Harness postmortem: checkpoint recovery and permission boundaries",
+    excerpt,
+    publishedAt: "2026-08-03T01:00:00.000Z",
+  }, trustedFetchOptions(async (input) => {
+    const cause = new Error(`socket timeout while fetching ${String(input)}`);
+    cause.code = "ETIMEDOUT";
+    throw new Error(`detail request failed for ${String(input)}`, { cause });
+  }));
+
+  assert.equal(enriched.contentText, excerpt, "详情正文失败时必须保留 feed excerpt，不能丢弃仍可分析的证据摘要");
+  assert.equal(enriched.enrichmentStatus, "degraded", "excerpt fallback 必须显式标记 degraded，不能伪装正文抓取成功");
+  assert.equal(enriched.contentCompleteness, "excerpt-only", "下游 LLM 必须能区分完整正文与仅 feed 摘要");
+  assert.equal(enriched.enrichmentError?.code, "ETIMEDOUT", "详情抓取底层错误码必须进入结构化诊断");
+  assert.match(enriched.enrichmentError?.message || "", /detail|详情|timeout/i, "结构化诊断必须说明失败发生在详情正文抓取");
+  assert.doesNotMatch(JSON.stringify(enriched.enrichmentError), new RegExp(secret), "enrichmentError 不得泄露 query credential");
+  assert.doesNotMatch(JSON.stringify(enriched.enrichmentError), /api_key=/i, "enrichmentError 不得保留敏感查询参数名和值");
+});
+
+test("P2 contract: excerpt-only enrichment degrades source health and the run while preserving the fallback analysis input", async () => {
+  const dataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-detail-enrichment-"));
+  const originalFetch = globalThis.fetch;
+  const previous = Object.fromEntries([
+    "RADAR_DATA_DIR",
+    "RADAR_AI_PROVIDER",
+    "DEEPSEEK_API_KEY",
+    "RADAR_DISABLE_AI",
+    "RADAR_SOURCE_CONCURRENCY",
+    "RADAR_FETCH_CONCURRENCY",
+    "RADAR_ANALYSIS_CONCURRENCY",
+    "RADAR_MAX_NEW_ITEMS",
+    "RADAR_RELEVANCE_THRESHOLD",
+    "RADAR_DISCOVERY_RELEVANCE_THRESHOLD",
+    "RADAR_MAX_ITEM_AGE_DAYS",
+    "RADAR_FETCH_RELAY_TEMPLATE",
+  ].map((key) => [key, process.env[key]]));
+  process.env.RADAR_DATA_DIR = dataDirectory;
+  process.env.RADAR_AI_PROVIDER = "deepseek";
+  process.env.DEEPSEEK_API_KEY = "detail-enrichment-contract-key";
+  delete process.env.RADAR_DISABLE_AI;
+  process.env.RADAR_SOURCE_CONCURRENCY = "1";
+  process.env.RADAR_FETCH_CONCURRENCY = "1";
+  process.env.RADAR_ANALYSIS_CONCURRENCY = "1";
+  process.env.RADAR_MAX_NEW_ITEMS = "4";
+  process.env.RADAR_RELEVANCE_THRESHOLD = "1";
+  process.env.RADAR_DISCOVERY_RELEVANCE_THRESHOLD = "1";
+  process.env.RADAR_MAX_ITEM_AGE_DAYS = "365";
+  delete process.env.RADAR_FETCH_RELAY_TEMPLATE;
+
+  const secret = "PIPELINE_DETAIL_SUPER_SECRET";
+  const articleUrl = `https://github.blog/engineering/agent-harness-postmortem/?api_key=${secret}`;
+  const excerpt = "Agent harness engineering postmortem covers checkpoint recovery, tool-call permissions, rollback validation, audit traces, and acceptance contracts for coding agents.";
+  const logs = [];
+  let analysisInput = "";
+  const logger = Object.fromEntries(["info", "warn", "error"].map((level) => [level, (...values) => {
+    logs.push(`${level}: ${values.map((value) => String(value)).join(" ")}`);
+  }]));
+
+  try {
+    const { loadSourceCatalog } = await import("../radar/catalog.mjs");
+    const { openDatabase, updateSourceHealth, upsertSourceCatalog } = await import("../radar/database.mjs");
+    const sources = await loadSourceCatalog();
+    const target = sources.find((source) => source.id === "github-engineering");
+    assert.ok(target, "fixture 依赖内置 GitHub Engineering feed");
+
+    const seeded = openDatabase();
+    try {
+      upsertSourceCatalog(seeded, sources);
+      const recentAttempt = new Date().toISOString();
+      for (const source of sources) {
+        updateSourceHealth(seeded, source, {
+          attemptedAt: recentAttempt,
+          status: "success",
+          error: null,
+          itemCount: 0,
+        });
+      }
+      seeded.prepare("UPDATE source_health SET last_attempt_at = NULL WHERE source_id = ?").run(target.id);
+    } finally {
+      seeded.close();
+    }
+
+    const feed = `<?xml version="1.0"?><rss version="2.0"><channel><title>GitHub Engineering</title><item><title>Agent Harness postmortem: checkpoint recovery and permission boundaries</title><link>${articleUrl.replaceAll("&", "&amp;")}</link><description>${excerpt}</description><pubDate>${new Date().toUTCString()}</pubDate></item></channel></rss>`;
+    const fetchImpl = async (input) => {
+      const url = String(input);
+      if (url.startsWith(target.url)) {
+        return new Response(feed, { status: 200, headers: { "content-type": "application/rss+xml" } });
+      }
+      if (url.startsWith("https://github.blog/engineering/agent-harness-postmortem/")) {
+        const cause = new Error(`connect timeout: ${url}`);
+        cause.code = "ETIMEDOUT";
+        throw new Error(`detail request failed: ${url}`, { cause });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    };
+    globalThis.fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (!url.includes("api.deepseek.com") || !url.endsWith("/chat/completions")) throw new Error(`unexpected AI request: ${url}`);
+      const request = JSON.parse(String(init.body || "{}"));
+      analysisInput = String(request.messages?.find((message) => message.role === "user")?.content || "");
+      const analysis = {
+        title: "详情不可用的 Agent Harness 工程复盘候选",
+        summary: "当前仅保留来源摘要，仍可用于判断主题相关性，但不足以作为公开工程结论。",
+        implication: "正文恢复前应保留候选及降级状态，不把摘要分析伪装成完整证据分析。",
+        topic: "工程",
+        conceptSlug: "agent-harness",
+        stage: "Emerging",
+        accent: "engineering",
+        tags: ["agent-harness", "durable-execution"],
+        publishDecision: "reject",
+        editorialScore: 25,
+        relevanceScore: 35,
+        noveltyScore: 30,
+        evidenceScore: 10,
+        eventKey: "agent-harness:excerpt-only-detail-failure",
+        candidateConcept: "",
+      };
+      return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(analysis) } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    const { runIngestion } = await import("../radar/pipeline.mjs");
+    const result = await runIngestion({
+      trigger: "systemd",
+      logger,
+      fetchOptions: trustedFetchOptions(fetchImpl),
+      modelLandscapeFetcher: async () => [],
+    });
+
+    assert.match(analysisInput, new RegExp(excerpt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "详情失败后仍必须把 feed excerpt 送入真实 LLM 分析链");
+    assert.equal(result.status, "partial", "任一详情正文降级必须使本轮 partial，不能报告 success");
+    assert.equal(result.degradedSourceCount, 1, "发生详情降级的来源必须进入 degraded source 计数");
+    assert.equal(result.enrichmentDegradedCount, 1, "运行汇总必须单独暴露 excerpt-only 详情降级数量");
+    assert.ok(result.errorCount >= 1, "详情正文降级必须进入运行错误/退化计数");
+    assert.match(result.message, /1 (?:detail )?enrichment degradation|1 条详情正文降级|excerpt-only/i, "run message 必须让运维看见详情降级数量");
+    assert.equal(result.snapshot.degradedSourceCount, 1, "网站状态快照必须继承来源 degraded 状态");
+
+    const inspected = openDatabase();
+    try {
+      const health = inspected.prepare("SELECT last_status, last_error FROM source_health WHERE source_id = ?").get(target.id);
+      assert.equal(health.last_status, "degraded", "source_health 不能只依据 feed discovery success 覆盖详情抓取失败");
+      assert.match(health.last_error || "", /ETIMEDOUT/i, "source_health 必须保留安全的底层错误码");
+      assert.match(health.last_error || "", /detail|详情|excerpt/i, "source_health 必须指出退化发生在详情正文阶段");
+      const run = inspected.prepare("SELECT status, error_count, message FROM runs ORDER BY id DESC LIMIT 1").get();
+      assert.equal(run.status, "partial");
+      assert.ok(run.error_count >= 1);
+      assert.match(run.message || "", /enrichment degradation|详情正文降级|excerpt-only/i);
+      const observable = `${logs.join("\n")}\n${health.last_error || ""}\n${run.message || ""}`;
+      assert.match(observable, /ETIMEDOUT/i, "日志或持久化诊断必须提供底层错误码");
+      assert.doesNotMatch(observable, new RegExp(secret), "日志、source health 和 run message 不得泄露 query credential");
+      assert.doesNotMatch(observable, /api_key=/i, "可观测输出不得复制敏感查询参数");
+    } finally {
+      inspected.close();
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
+});
+
 test("pipeline persists degraded source health, counts it as available, and marks the run partial", async () => {
   const dataDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-radar-degraded-source-"));
   const previous = Object.fromEntries([

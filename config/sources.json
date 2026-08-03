@@ -113,6 +113,26 @@
     "enabled": true
   },
   {
+    "id": "github-engineering",
+    "family": "official",
+    "name": "GitHub Engineering",
+    "kind": "feed",
+    "url": "https://github.blog/engineering/feed/",
+    "homepage": "https://github.blog/engineering/",
+    "class": "工程深度与复盘",
+    "layer": "official",
+    "language": "en",
+    "priority": "P0",
+    "cadence": "8h",
+    "focus": "Coding agents · AI developer infrastructure · Architecture · Engineering postmortems",
+    "contentRoles": [
+      "engineering-postmortem"
+    ],
+    "independentGroup": "github",
+    "maxItems": 20,
+    "enabled": true
+  },
+  {
     "id": "microsoft-agent-framework",
     "family": "official",
     "name": "Microsoft Agent Framework",
@@ -234,6 +254,7 @@
     "priority": "P0",
     "cadence": "4h",
     "focus": "新概念 · Agent engineering · AI Coding",
+    "contentRoles": ["podcast-transcript", "interview"],
     "independentGroup": "latent-space",
     "maxItems": 16,
     "enabled": true
@@ -251,6 +272,7 @@
     "priority": "P0",
     "cadence": "4h",
     "focus": "Agentic engineering · Security · Coding agents",
+    "contentRoles": ["engineering-postmortem"],
     "independentGroup": "simon-willison",
     "maxItems": 14,
     "includeUrlPatterns": ["^https://feeds\\.simonwillison\\.net/20\\d{2}/"],

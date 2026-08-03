@@ -1,0 +1,92 @@
+[
+  {
+    "id": "ai-coding-engineering",
+    "zhName": "AI 编程工程",
+    "enName": "AI Coding Engineering",
+    "aliases": ["AI Coding", "Coding Agent", "智能编程工程"]
+  },
+  {
+    "id": "agent-runtime",
+    "zhName": "Agent 运行时",
+    "enName": "Agent Runtime",
+    "aliases": ["智能体运行时", "Agent Harness", "运行支架"]
+  },
+  {
+    "id": "multi-agent-orchestration",
+    "zhName": "多 Agent 编排",
+    "enName": "Multi-agent Orchestration",
+    "aliases": ["多智能体编排", "Agent Team", "Agent Manager", "Delegation"]
+  },
+  {
+    "id": "context-memory",
+    "zhName": "上下文与记忆",
+    "enName": "Context and Memory",
+    "aliases": ["Context Engineering", "Memory", "上下文工程"]
+  },
+  {
+    "id": "tools-protocols",
+    "zhName": "工具与协议",
+    "enName": "Tools and Protocols",
+    "aliases": ["Tool Use", "MCP", "A2A", "工具调用"]
+  },
+  {
+    "id": "durable-execution",
+    "zhName": "持久执行与恢复",
+    "enName": "Durable Execution and Recovery",
+    "aliases": ["Durable Execution", "Checkpointing", "检查点", "故障恢复"]
+  },
+  {
+    "id": "evaluation-verification",
+    "zhName": "评测与验证",
+    "enName": "Evaluation and Verification",
+    "aliases": ["Evals", "Verification", "验收", "验证闭环"]
+  },
+  {
+    "id": "observability-debugging",
+    "zhName": "可观测性与调试",
+    "enName": "Observability and Debugging",
+    "aliases": ["Observability", "Tracing", "Agent Debugging", "可观测性"]
+  },
+  {
+    "id": "security-sandbox",
+    "zhName": "安全、权限与沙箱",
+    "enName": "Security, Permissions and Sandbox",
+    "aliases": ["Agent Security", "Sandbox", "Permission Boundary", "权限边界"]
+  },
+  {
+    "id": "human-agent-collaboration",
+    "zhName": "人机协作",
+    "enName": "Human-agent Collaboration",
+    "aliases": ["Human-in-the-loop", "HITL", "人工介入", "协作责任"]
+  },
+  {
+    "id": "codebase-intelligence",
+    "zhName": "代码库理解",
+    "enName": "Codebase Intelligence",
+    "aliases": ["Repository Map", "Code Graph", "Codebase Understanding", "代码图谱"]
+  },
+  {
+    "id": "agentic-testing",
+    "zhName": "Agentic Testing",
+    "enName": "Agentic Testing",
+    "aliases": ["测试智能体", "Agent Testing", "Test Generation"]
+  },
+  {
+    "id": "spec-driven-development",
+    "zhName": "规格驱动开发",
+    "enName": "Spec-driven Development",
+    "aliases": ["Spec-driven", "Specification", "规格驱动"]
+  },
+  {
+    "id": "agentic-delivery",
+    "zhName": "Agentic 交付",
+    "enName": "Agentic Delivery",
+    "aliases": ["Agentic CI/CD", "Background Agents", "后台智能体", "自动交付"]
+  },
+  {
+    "id": "graph-knowledge-engineering",
+    "zhName": "图与知识工程",
+    "enName": "Graph and Knowledge Engineering",
+    "aliases": ["Graph Engineering", "Knowledge Graph", "知识图谱", "图工程"]
+  }
+]
