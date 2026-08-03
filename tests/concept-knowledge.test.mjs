@@ -881,6 +881,151 @@ test("concept analyzer retry correction exposes only fixed error categories and 
   assert.doesNotMatch(correction, /https?:\/\//iu, "修正提示本身不得包含首轮模型输出的任何可执行 URL");
 });
 
+test("DeepSeek concept adapter repairs bounded mechanical drift without weakening evidence gates", async () => {
+  const { analyzeConceptKnowledgeArticle } = await import("../radar/concept-analyze.mjs");
+  const sourceUrl = "https://vendor-alpha.example.com/engineering/bounded-concept-repair";
+  const originalTitle = "Bounded repair for evidence-driven concept synthesis";
+  const article = {
+    url: sourceUrl,
+    sourceId: SOURCES.vendorBlog.id,
+    sourceName: SOURCES.vendorBlog.name,
+    sourceClass: SOURCES.vendorBlog.class,
+    sourceLayer: SOURCES.vendorBlog.layer,
+    independentGroup: SOURCES.vendorBlog.independentGroup,
+    sourceLanguage: "en",
+    originalTitle,
+    originalExcerpt: "The source describes a runtime contract with checkpoints and evidence gates.",
+    contentText: "The implementation records checkpoints before side effects and validates recovery outcomes.",
+    publishedAt: "2026-08-03T04:00:00.000Z",
+    discoveredAt: "2026-08-03T04:05:00.000Z",
+    conceptSlug: "agent-harness",
+    candidateConcept: "Runtime Assurance Loop",
+  };
+  const drifted = fullKnowledgePayload({
+    evidence: [evidenceFor(SOURCES.vendorBlog, sourceUrl, originalTitle)],
+  });
+  drifted.identityDecision = {
+    action: "create-new",
+    canonicalSlug: "runtime-assurance-loop",
+    confidence: 0.91,
+    reason: "该概念具有独立的运行问题、恢复机制和可验证边界，应建立新的规范身份。",
+    comparedSlugs: [],
+  };
+  drifted.concept.themes = ["Agent Runtime", "vendor-magic-dashboard"];
+  drifted.concept.stage = "spark";
+  drifted.concept.heat = "64";
+  drifted.concept.maturity = 140;
+  drifted.concept.designConstraints.push("Use checkpoints before side effects.");
+  delete drifted.concept.controversies;
+  drifted.concept.lastMeaningfulChange = "not-a-date";
+  drifted.evidence[0].originalTitle = "模型自行翻译后的错误标题";
+  drifted.citations = drifted.citations.filter((citation) => citation.field !== "mechanism");
+  drifted.relations = [{
+    type: "looks-like",
+    targetSlug: "unknown-concept",
+    explanation: "Unsupported relation",
+    evidenceUrls: [sourceUrl],
+    confidence: 0.5,
+  }];
+
+  const requests = [];
+  const analyzed = await analyzeConceptKnowledgeArticle(article, {
+    provider: "deepseek",
+    knownConcepts: [],
+    now: "2026-08-03T05:00:00.000Z",
+    maxAttempts: 1,
+    environment: {
+      RADAR_AI_PROVIDER: "deepseek",
+      DEEPSEEK_API_KEY: "bounded-repair-test-key",
+      RADAR_DEEPSEEK_CONCEPT_MODEL: "deepseek-bounded-repair-test",
+      RADAR_DEEPSEEK_CONCEPT_TIMEOUT_MS: "10000",
+    },
+    fetchImpl: async (_input, init = {}) => {
+      requests.push(JSON.parse(String(init.body || "{}")));
+      return new Response(JSON.stringify({
+        choices: [{
+          finish_reason: "stop",
+          message: { content: `\`\`\`json\n${JSON.stringify({ concepts: [drifted] })}\n\`\`\`` },
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  assert.equal(requests.length, 1, "确定性机械修复不应浪费一次额外模型调用");
+  assert.ok(Array.isArray(analyzed));
+  const [concept] = analyzed;
+  assert.deepEqual(concept.concept.themes, ["agent-runtime"]);
+  assert.equal(concept.concept.stage, "candidate");
+  assert.equal(concept.concept.heat, 64);
+  assert.equal(concept.concept.maturity, 100);
+  assert.equal(concept.concept.lastMeaningfulChange, "2026-08-03T05:00:00.000Z");
+  assert.equal(concept.concept.controversies.length, 0);
+  assert.equal(concept.concept.designConstraints.some((item) => /Use checkpoints/u.test(item)), false);
+  assert.equal(concept.evidence[0].originalTitle, originalTitle, "当前证据原标题必须由权威文章元数据恢复");
+  assert.equal(concept.relations.length, 0, "未知或无效关系应被安全丢弃而不是拖垮整篇知识");
+  assert.ok(concept.citations.some((citation) => citation.field === "mechanism"), "缺失的当前文章字段引文应被安全补齐");
+});
+
+test("concept retry identifies the exact safe Chinese field without echoing rejected content", async () => {
+  const { analyzeConceptKnowledgeArticle } = await import("../radar/concept-analyze.mjs");
+  const sourceUrl = "https://vendor-alpha.example.com/engineering/chinese-field-retry";
+  const originalTitle = "Chinese field retry contract";
+  const article = {
+    url: sourceUrl,
+    sourceId: SOURCES.vendorBlog.id,
+    sourceName: SOURCES.vendorBlog.name,
+    sourceClass: SOURCES.vendorBlog.class,
+    sourceLayer: SOURCES.vendorBlog.layer,
+    independentGroup: SOURCES.vendorBlog.independentGroup,
+    sourceLanguage: "en",
+    originalTitle,
+    originalExcerpt: "Evidence about safe Chinese editorial retries.",
+    contentText: "The source describes checkpoints and deterministic recovery boundaries.",
+    publishedAt: "2026-08-03T05:00:00.000Z",
+  };
+  const valid = fullKnowledgePayload({
+    evidence: [evidenceFor(SOURCES.vendorBlog, sourceUrl, originalTitle)],
+  });
+  valid.identityDecision = {
+    action: "create-new",
+    canonicalSlug: "runtime-assurance-loop",
+    confidence: 0.91,
+    reason: "该概念具有独立问题、机制与验证方式，本次证据支持建立新的规范身份。",
+    comparedSlugs: [],
+  };
+  const invalid = structuredClone(valid);
+  invalid.concept.definition = "THIS_RAW_ENGLISH_VALUE_MUST_NEVER_BE_ECHOED into the correction prompt.";
+  const requests = [];
+
+  const analyzed = await analyzeConceptKnowledgeArticle(article, {
+    provider: "deepseek",
+    knownConcepts: [],
+    now: "2026-08-03T05:30:00.000Z",
+    maxAttempts: 2,
+    environment: {
+      RADAR_AI_PROVIDER: "deepseek",
+      DEEPSEEK_API_KEY: "chinese-field-retry-test-key",
+      RADAR_DEEPSEEK_CONCEPT_MODEL: "deepseek-chinese-field-test",
+      RADAR_DEEPSEEK_CONCEPT_TIMEOUT_MS: "10000",
+    },
+    fetchImpl: async (_input, init = {}) => {
+      const request = JSON.parse(String(init.body || "{}"));
+      requests.push(request);
+      const payload = requests.length === 1 ? invalid : valid;
+      return new Response(JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ concepts: [payload] }) } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  assert.equal(analyzed[0].concept.slug, "runtime-assurance-loop");
+  assert.equal(requests.length, 2);
+  const correction = String(requests[1].messages.at(-1)?.content || "");
+  assert.match(correction, /chinese-editorial/u);
+  assert.match(correction, /definition/u, "纠错提示必须告诉模型具体需要修复的安全字段");
+  assert.doesNotMatch(correction, /THIS_RAW_ENGLISH_VALUE|https?:\/\//iu);
+});
+
 test("analysis parser rejects malformed JSON, fabricated links, English editorial output and illegal relations", async () => {
   const { parseConceptKnowledgeAnalysis } = await knowledgeApi("parseConceptKnowledgeAnalysis");
   const sourceUrl = "https://evidence.example.com/runtime";

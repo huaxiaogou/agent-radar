@@ -144,7 +144,7 @@ RADAR_OPENAI_MODEL=gpt-5.6-terra
 
 ### 概念知识分析与历史回溯
 
-信号编辑和概念知识综合是两条不同但相连的 LLM 链：前者判断单篇文章是否发布，后者把已入库文章沉淀为可修订的工程知识对象。概念链只使用 SQLite 中保存的正文和明确允许的原始 URL，文章内容始终按不可信输入处理；来源声明的 `contentRoles` 会经过白名单验证后随文章持久化，并把当前受控的“播客文字稿、访谈、工程复盘”职责送入概念 LLM，而不是靠来源名称猜测长文用途。模型输出必须通过严格 JSON、中文、受控主题、身份裁决、证据 URL、主张绑定和关系白名单校验。单篇文章允许产出 1–8 个可独立命名、实现和验证的概念；整篇结果在同一 SQLite 事务内全部验证与追加，任何一个输出无效都会回滚全部概念并保留各自最后有效版本。若首轮结果同时复用多个既有概念，分析器会为每个被选中的规范 slug 补载完整旧 dossier 后再次分析，禁止仅凭名称、定义摘要盲写其他概念。供应商、模型、分析器版本与身份裁决会进入追加式修订和回填审计。
+信号编辑和概念知识综合是两条不同但相连的 LLM 链：前者判断单篇文章是否发布，后者把已入库文章沉淀为可修订的工程知识对象。概念链只使用 SQLite 中保存的正文和明确允许的原始 URL，文章内容始终按不可信输入处理；来源声明的 `contentRoles` 会经过白名单验证后随文章持久化，并把当前受控的“播客文字稿、访谈、工程复盘”职责送入概念 LLM，而不是靠来源名称猜测长文用途。模型输出必须通过严格 JSON、中文、受控主题、身份裁决、证据 URL、主张绑定和关系白名单校验。DeepSeek JSON mode 返回后会先执行有界确定性归一：解开纯 JSON 代码围栏、把主题名称/别名映射到受控 id、恢复当前文章的权威证据元数据、补齐允许为空的数组和当前证据字段引文，并丢弃指向未知目标或缺少合法证据的可选关系；它不会接受或改写伪造 URL，也不会把英文核心知识放行。仍不合格时默认最多三次请求，并只向模型反馈固定错误类别与具体安全字段名，不回灌原始模型值。单篇文章允许产出 1–8 个可独立命名、实现和验证的概念；整篇结果在同一 SQLite 事务内全部验证与追加，任何一个输出无效都会回滚全部概念并保留各自最后有效版本。若首轮结果同时复用多个既有概念，分析器会为每个被选中的规范 slug 补载完整旧 dossier 后再次分析，禁止仅凭名称、定义摘要盲写其他概念。供应商、模型、分析器版本与身份裁决会进入追加式修订和回填审计。
 
 正常 `npm run ingest` 会把本轮新文章优先交给概念链；新增和历史重试共同受 `RADAR_CONCEPT_INCREMENTAL_BATCH_SIZE` 单轮总预算约束，默认 20。只有新文章使用后剩余的额度才能用于历史记录，并继续受 `RADAR_CONCEPT_RETRY_BATCH_SIZE` 子上限约束，默认 4。当前内容哈希从未处理的 pending 优先于已失败记录；已经 completed 但知识 Schema 或分析器版本落后的历史记录也会重新进入这个有界队列；失败记录按最早尝试时间轮转，因此永久失败既不会饿死新 backlog，也不能突破总预算。不需要增加第二个 systemd timer。概念失败不会回滚已经完成的文章采集，也不会覆盖最后有效知识，但会把本轮标成 `partial` 并计入 `errorCount`。运行结果中的 `conceptUpdatedCount`、`conceptSkippedCount`、`conceptFailureCount` 分别表示本轮知识修订、幂等跳过和失败数量。
 
@@ -164,7 +164,7 @@ npm run concepts:check
 
 正常回溯以 `article URL + input contract hash + knowledge schema version + analyzer version` 作为幂等边界；输入契约哈希稳定覆盖正文 `content_hash` 与白名单归一后的 `contentRoles`。因此正文、播客/访谈/复盘职责、知识协议或分析器任一变化都会重新处理一次，而顺序、重复或未知角色不会制造伪变化。提交 CAS 会再次核对正文与职责，分析期间发生变化只留下可重试 conflict，不提交陈旧知识。任务按批提交，可在中断后再次执行。任一坏输入，或全部候选正被有效 lease 占用而导致某批零进展时，命令会在单批后以 `partial` 非零退出且不替换公开快照，避免空转一万批；修复模型输出或等待 lease 到期后直接重跑即可。可用 `--batch-size`、`--concurrency`、`--max-batches` 覆盖默认值；重复传入 `--url <article-url>` 会强制定向重分析全部指定文章，即使数量跨越多个批次也不会恢复 completed skip，但仍遵守 lease、事务和 CAS 门禁。
 
-`concepts:check` 不只统计数量。它会检查 current payload 是否可从 append-only revision 恢复、正式概念的公开 publish evidence、主张证据和所有非空知识字段引用。完全健康输出 `ok`；从 last-good 恢复但需要修复 current payload 时输出 `warning` 且退出码仍为 0；不可恢复损坏、公开质量失败、pending、failed 或没有正式概念时输出 `not-ready` 并非零退出。状态中的 `recentFailures` 最多列出 10 条当前输入契约下最新的 failed/conflict 文章，只含去掉 query/fragment 的 HTTPS host+path、状态和尝试时间；旧正文、旧角色、旧分析器失败不会混入，CLI、pipeline、快照和 `/api/status` 也不会回显模型原文、URL 凭据或密钥。
+`concepts:check` 不只统计数量。它会检查 current payload 是否可从 append-only revision 恢复、正式概念的公开 publish evidence、主张证据和所有非空知识字段引用。完全健康输出 `ok`；从 last-good 恢复但需要修复 current payload 时输出 `warning` 且退出码仍为 0；不可恢复损坏、公开质量失败、pending、failed 或没有正式概念时输出 `not-ready` 并非零退出。状态中的 `recentFailures` 最多列出 10 条当前输入契约下最新的 failed/conflict 文章，只含去掉 query/fragment 的 HTTPS host+path、状态、尝试时间和固定枚举 `errorCategory`；旧正文、旧角色、旧分析器失败不会混入，CLI、pipeline、快照和 `/api/status` 也不会回显模型原文、URL 凭据或密钥。回填 CLI 的 `failures` 同样携带安全类别，例如 `relation-contract`、`chinese-editorial`、`evidence-contract`、`schema-contract`、`theme-contract` 或 `invalid-json`，无需直接查询数据库 `last_error`。
 
 确认两个概念实际上是同一知识对象后，用显式人工命令合并，原因必须包含中文说明：
 

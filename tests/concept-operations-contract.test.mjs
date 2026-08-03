@@ -15,6 +15,7 @@ import {
   applyConceptKnowledgeRevision,
   CONCEPT_ANALYZER_VERSION,
   CONCEPT_KNOWLEDGE_SCHEMA_VERSION,
+  conceptAnalysisFailureCategory,
   conceptArticleInputContractHash,
   getConceptPublicationReadiness,
   runConceptKnowledgeBackfill,
@@ -45,6 +46,21 @@ const ENVIRONMENT_KEYS = [
 
 const originalEnvironment = Object.fromEntries(ENVIRONMENT_KEYS.map((key) => [key, process.env[key]]));
 const originalFetch = globalThis.fetch;
+
+test("concept failures expose fixed operational categories without returning raw model errors", () => {
+  const fixtures = [
+    ["关系 targetSlug 不是已知正式概念：https://attacker.invalid/RAW_PROVIDER_SECRET", "relation-contract"],
+    ["definition 必须是中文主导内容：RAW_PROVIDER_SECRET", "chinese-editorial"],
+    ["证据链接不在允许来源中：https://attacker.invalid/RAW_PROVIDER_SECRET", "evidence-contract"],
+    ["概念知识缺少 mechanism：RAW_PROVIDER_SECRET", "schema-contract"],
+    ["concept.themes 包含未知工程主题：RAW_PROVIDER_SECRET", "theme-contract"],
+    ["概念知识输出不是有效 JSON：RAW_PROVIDER_SECRET", "invalid-json"],
+  ];
+  assert.deepEqual(
+    fixtures.map(([message]) => conceptAnalysisFailureCategory(message)),
+    fixtures.map(([, category]) => category),
+  );
+});
 
 afterEach(async () => {
   globalThis.fetch = originalFetch;
@@ -327,6 +343,11 @@ test("P1 contract: backfill failure results redact query credentials and raw pro
   });
 
   assert.equal(result.failedCount, 2, "fixture 必须通过真实 backfill 失败链产生两个可观测失败");
+  assert.deepEqual(
+    result.failures.map((failure) => failure.errorCategory),
+    ["concept-analysis-failed", "concept-analysis-failed"],
+    "backfill 运维投影必须返回固定错误类别，不能回传原始 provider 文本",
+  );
   assertSafeFailureObservable(result, {
     safePaths: [
       `${operationsSource.homepage}/failed-credential-evidence`,
@@ -364,6 +385,7 @@ test("P1 contract: readiness exposes only sanitized failure locators", async () 
     safePaths: [`${operationsSource.homepage}/readiness-failure`],
     label: "concept readiness recentFailures",
   });
+  assert.equal(readiness.recentFailures[0]?.errorCategory, "concept-analysis-failed");
 });
 
 test("P1 contract: concepts:check exposes only sanitized failure locators", async () => {

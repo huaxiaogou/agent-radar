@@ -5,6 +5,13 @@ import path from "node:path";
 import { resolveAnalysisProvider } from "../../radar/provider.mjs";
 import { seedRadarSnapshot, type Concept, type ConceptReadiness, type RadarSnapshot } from "./radar-data";
 
+const SAFE_CONCEPT_FAILURE_CATEGORIES = new Set([
+  "article-input-conflict", "analysis-superseded", "provider-auth", "provider-rate-limit",
+  "provider-server-error", "provider-transport", "invalid-json", "chinese-editorial",
+  "relation-contract", "theme-contract", "identity-contract", "evidence-contract",
+  "claim-contract", "schema-contract", "concept-analysis-failed",
+]);
+
 function snapshotPath() {
   if (process.env.RADAR_DATA_DIR) {
     return path.join(/* turbopackIgnore: true */ path.resolve(process.env.RADAR_DATA_DIR), "radar-snapshot.json");
@@ -154,11 +161,15 @@ function normalizedConceptReadiness(snapshot: RadarSnapshot): ConceptReadiness {
     }
   };
   const recentFailures = Array.isArray(readiness?.recentFailures)
-    ? readiness.recentFailures.slice(0, 10).map((failure) => ({
-      articleUrl: safeFailureUrl(failure?.articleUrl),
-      status: String(failure?.status || "failed"),
-      attemptedAt: typeof failure?.attemptedAt === "string" ? failure.attemptedAt : null,
-    }))
+    ? readiness.recentFailures.slice(0, 10).map((failure) => {
+      const category = String(failure?.errorCategory || "");
+      return {
+        articleUrl: safeFailureUrl(failure?.articleUrl),
+        status: String(failure?.status || "failed"),
+        attemptedAt: typeof failure?.attemptedAt === "string" ? failure.attemptedAt : null,
+        ...(SAFE_CONCEPT_FAILURE_CATEGORIES.has(category) ? { errorCategory: category } : {}),
+      };
+    })
     : [];
   const numericFields = [
     "formalConceptCount",

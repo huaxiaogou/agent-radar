@@ -115,9 +115,29 @@ export function safeOperationalArticleUrl(value) {
   }
 }
 
+export function conceptAnalysisFailureCategory(message, status = "failed") {
+  const value = String(message || "");
+  if (status === "conflict") return "article-input-conflict";
+  if (status === "superseded") return "analysis-superseded";
+  if (/HTTP\s+(401|403)\b|unauthorized|forbidden/iu.test(value)) return "provider-auth";
+  if (/HTTP\s+429\b|rate.?limit|限流/iu.test(value)) return "provider-rate-limit";
+  if (/HTTP\s+5\d\d\b|insufficient_system_resource/iu.test(value)) return "provider-server-error";
+  if (/fetch failed|timeout|超时|ECONN|ENET|socket|network/iu.test(value)) return "provider-transport";
+  if (/不是有效 JSON|invalid JSON|返回空|被截断|响应未完成/iu.test(value)) return "invalid-json";
+  if (/中文|汉字|Chinese/iu.test(value)) return "chinese-editorial";
+  if (/关系|relation|targetSlug/iu.test(value)) return "relation-contract";
+  if (/theme|主题/iu.test(value)) return "theme-contract";
+  if (/identityDecision|身份裁决|reuse-existing|create-new|needs-review/iu.test(value)) return "identity-contract";
+  if (/证据|evidence|引用|citation|链接|URL|原标题|originalTitle|supports/iu.test(value)) return "evidence-contract";
+  if (/claim|主张/iu.test(value)) return "claim-contract";
+  if (/缺少|无效|必须|枚举|数组|对象|字段/iu.test(value)) return "schema-contract";
+  return "concept-analysis-failed";
+}
+
 function safeOperationalFailure(item) {
   const status = String(item?.status || "failed");
   const internalMessage = String(item?.error || "");
+  const errorCategory = conceptAnalysisFailureCategory(internalMessage, status);
   const safeError = status === "conflict"
     ? "article input contract changed during analysis"
     : status === "superseded"
@@ -131,6 +151,7 @@ function safeOperationalFailure(item) {
     url: safeOperationalArticleUrl(item?.url),
     status,
     error: safeError,
+    errorCategory,
   };
 }
 
@@ -218,6 +239,7 @@ function validateIdentityDecision(value, { required = false } = {}) {
   const confidence = Number(decision.confidence);
   if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) throw new Error("identityDecision.confidence 必须在 0-1 之间");
   if (typeof decision.reason !== "string" || decision.reason.trim().length < 12) throw new Error("identityDecision.reason 必须说明身份裁决依据");
+  if (!chineseLed(decision.reason)) throw new Error("identityDecision.reason 必须是中文主导内容");
   if (!Array.isArray(decision.comparedSlugs)) throw new Error("identityDecision.comparedSlugs 必须是数组");
   for (const slug of decision.comparedSlugs) {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(String(slug || ""))) throw new Error(`identityDecision.comparedSlugs 含非法 slug：${slug || "空"}`);
@@ -2056,7 +2078,7 @@ export function getConceptKnowledgeStatus(database) {
     analyzer_version: row.analyzer_version,
   }, row, CONCEPT_KNOWLEDGE_SCHEMA_VERSION, CONCEPT_ANALYZER_VERSION)).length;
   const failureRows = database.prepare(`
-    SELECT b.article_url, b.input_contract_hash, b.status, b.attempted_at,
+    SELECT b.article_url, b.input_contract_hash, b.status, b.attempted_at, b.last_error,
            a.content_hash AS article_content_hash, a.content_roles_json
     FROM concept_backfill b
     INNER JOIN articles a
@@ -2078,6 +2100,7 @@ export function getConceptKnowledgeStatus(database) {
     articleUrl: safeOperationalArticleUrl(row.article_url),
     status: row.status,
     attemptedAt: row.attempted_at,
+    errorCategory: conceptAnalysisFailureCategory(row.last_error, row.status),
   }));
   const integrityCounts = database.prepare(`
     SELECT slug

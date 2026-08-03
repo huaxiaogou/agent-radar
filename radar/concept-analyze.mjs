@@ -1,6 +1,10 @@
 import { cleanText } from "./fetch.mjs";
 import { parseConceptKnowledgeAnalysis } from "./concept-knowledge.mjs";
-import { ENGINEERING_THEMES, ENGINEERING_THEME_IDS } from "./concept-themes.mjs";
+import {
+  DEFAULT_ENGINEERING_THEME,
+  ENGINEERING_THEMES,
+  ENGINEERING_THEME_IDS,
+} from "./concept-themes.mjs";
 import { resolveAnalysisProvider } from "./provider.mjs";
 import { normalizeSourceContentRoles } from "./catalog.mjs";
 
@@ -25,6 +29,21 @@ const CITABLE_FIELDS = [
   "definition", "nonDefinition", "problem", "whyNow", "origin", "evolution", "mechanism", "architecture",
   "designConstraints", "implementationPatterns", "antiPatterns", "tradeoffs", "failureModes", "securityRisks",
   "operationalConcerns", "applicability", "nonApplicability", "controversies", "dailyDelta", "aliases",
+];
+const CONCEPT_ARRAY_FIELDS = [
+  "aliases", "evolution", "designConstraints", "implementationPatterns", "antiPatterns", "tradeoffs",
+  "failureModes", "securityRisks", "operationalConcerns", "applicability", "nonApplicability", "controversies",
+];
+const CHINESE_ARRAY_FIELDS = CONCEPT_ARRAY_FIELDS.filter((field) => field !== "aliases");
+const CHINESE_TEXT_FIELDS = [
+  "definition", "nonDefinition", "problem", "whyNow", "origin", "mechanism", "architecture", "dailyDelta",
+];
+const RETRY_SAFE_FIELDS = [
+  "identityDecision.action", "identityDecision.canonicalSlug", "identityDecision.confidence",
+  "identityDecision.reason", "identityDecision.comparedSlugs", "concept.slug", "concept.canonicalName",
+  "concept.themes", "claims.text", "claims.key", "evidence.url", "evidence.originalTitle",
+  "evidence.supports", "citations.evidenceUrls", "relations.type", "relations.targetSlug",
+  "relations.explanation", "relations.evidenceUrls", ...CHINESE_TEXT_FIELDS, ...CONCEPT_ARRAY_FIELDS,
 ];
 
 const CONCEPT_KNOWLEDGE_SCHEMA = {
@@ -352,6 +371,200 @@ function identityKey(value) {
     .trim();
 }
 
+function chineseLed(value) {
+  const text = String(value || "").trim();
+  const han = (text.match(/[\u3400-\u9fff]/gu) || []).length;
+  const latin = (text.match(/[A-Za-z]/gu) || []).length;
+  return han >= 4 && han / Math.max(1, han + latin) >= 0.2;
+}
+
+function boundedInteger(value, fallback = 0) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(number)));
+}
+
+function uniqueStrings(value) {
+  return [...new Set((Array.isArray(value) ? value : [])
+    .map((item) => typeof item === "string" ? item.trim() : "")
+    .filter(Boolean))];
+}
+
+function normalizedThemeSelection(value) {
+  const aliases = new Map();
+  for (const theme of ENGINEERING_THEMES) {
+    for (const label of [theme.id, theme.zhName, theme.enName, ...theme.aliases]) {
+      aliases.set(identityKey(label), theme.id);
+    }
+  }
+  const selected = uniqueStrings(value)
+    .map((item) => aliases.get(identityKey(item)))
+    .filter(Boolean);
+  return [...new Set(selected)].slice(0, 6).length
+    ? [...new Set(selected)].slice(0, 6)
+    : [DEFAULT_ENGINEERING_THEME];
+}
+
+function decodeProviderJson(raw) {
+  if (typeof raw !== "string") return structuredClone(raw);
+  const source = raw.trim().replace(/^\uFEFF/u, "");
+  try {
+    return JSON.parse(source);
+  } catch {
+    // DeepSeek JSON mode can still occasionally wrap an otherwise valid
+    // object in a Markdown fence or a short lead-in. The extracted value is
+    // subjected to the same strict semantic/evidence validation below.
+    const fenced = source.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/iu)?.[1]?.trim();
+    if (fenced) {
+      try { return JSON.parse(fenced); } catch { /* continue to bounded extraction */ }
+    }
+    const start = source.indexOf("{");
+    const end = source.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try { return JSON.parse(source.slice(start, end + 1)); } catch { /* handled below */ }
+    }
+    throw new Error("概念知识输出不是有效 JSON");
+  }
+}
+
+function evidenceAuthority(article, existingKnowledge) {
+  const authority = new Map();
+  for (const knowledge of existingKnowledgeItems(existingKnowledge)) {
+    const concept = knowledge?.concept || knowledge;
+    for (const evidence of knowledge?.evidence || concept?.evidence || []) {
+      if (evidence?.url) authority.set(evidence.url, evidence);
+    }
+  }
+  authority.set(article.url, {
+    url: article.url,
+    originalTitle: article.originalTitle,
+    sourceName: article.sourceName,
+    sourceLayer: article.sourceLayer,
+    independentGroup: article.independentGroup,
+    publishedAt: article.publishedAt,
+  });
+  return authority;
+}
+
+function normalizeProviderPayload(raw, {
+  article,
+  existingKnowledge,
+  knownConceptSlugs,
+  knownRelationTargetSlugs,
+  now,
+} = {}) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const value = structuredClone(raw);
+  if (!value.concept || typeof value.concept !== "object" || Array.isArray(value.concept)) return value;
+  const concept = value.concept;
+
+  concept.themes = normalizedThemeSelection(concept.themes);
+  concept.stage = CONCEPT_STAGES.includes(String(concept.stage || "").toLowerCase())
+    ? String(concept.stage).toLowerCase()
+    : "candidate";
+  concept.heat = boundedInteger(concept.heat);
+  concept.maturity = boundedInteger(concept.maturity);
+  concept.lastMeaningfulChange = now;
+  for (const field of CONCEPT_ARRAY_FIELDS) concept[field] = uniqueStrings(concept[field]);
+  for (const field of CHINESE_ARRAY_FIELDS) {
+    concept[field] = concept[field].filter(chineseLed);
+  }
+
+  const knownIdentities = new Set(knownConceptSlugs);
+  if (value.identityDecision && typeof value.identityDecision === "object" && !Array.isArray(value.identityDecision)) {
+    const decision = value.identityDecision;
+    decision.comparedSlugs = uniqueStrings(decision.comparedSlugs).filter((slug) => knownIdentities.has(slug));
+    decision.confidence = Math.max(0, Math.min(1, Number(decision.confidence) || 0));
+    if (decision.action === "create-new") decision.canonicalSlug = concept.slug;
+    if (decision.action === "reuse-existing" && (!knownIdentities.has(decision.canonicalSlug) || decision.confidence < 0.8)) {
+      decision.action = "needs-review";
+      decision.canonicalSlug = concept.slug;
+      concept.stage = "candidate";
+    }
+    if (decision.action === "create-new" && decision.confidence < 0.8) {
+      decision.action = "needs-review";
+      decision.canonicalSlug = concept.slug;
+      concept.stage = "candidate";
+    }
+    if (decision.action === "needs-review") {
+      if (decision.canonicalSlug !== concept.slug && !knownIdentities.has(decision.canonicalSlug)) {
+        decision.canonicalSlug = concept.slug;
+      }
+      concept.stage = "candidate";
+    }
+  }
+
+  const claims = (Array.isArray(value.claims) ? value.claims : [])
+    .filter((claim) => claim && typeof claim === "object")
+    .map((claim) => ({
+      ...claim,
+      key: String(claim.key || "").trim(),
+      text: String(claim.text || "").trim(),
+      confidence: Math.max(0, Math.min(1, Number(claim.confidence) || 0)),
+    }));
+  value.claims = claims;
+  const claimKeys = new Set(claims.map((claim) => claim.key));
+  const authority = evidenceAuthority(article, existingKnowledge);
+  value.evidence = (Array.isArray(value.evidence) ? value.evidence : [])
+    .filter((evidence) => evidence && typeof evidence === "object")
+    .map((evidence) => {
+      const canonical = authority.get(evidence.url);
+      const supports = uniqueStrings(evidence.supports).filter((key) => claimKeys.has(key));
+      return {
+        ...evidence,
+        ...(canonical ? {
+          url: canonical.url,
+          originalTitle: canonical.originalTitle,
+          sourceName: canonical.sourceName,
+          sourceLayer: canonical.sourceLayer,
+          independentGroup: canonical.independentGroup,
+          publishedAt: canonical.publishedAt || article.publishedAt,
+        } : {}),
+        supports: supports.length === 0 && evidence.url === article.url ? [...claimKeys] : supports,
+        stance: EVIDENCE_STANCES.includes(evidence.stance) ? evidence.stance : "context",
+      };
+    });
+
+  const requiredCitationFields = [
+    ...CHINESE_TEXT_FIELDS,
+    ...CONCEPT_ARRAY_FIELDS.filter((field) => concept[field].length > 0),
+  ];
+  const requiredCitationSet = new Set(requiredCitationFields);
+  const citationMap = new Map();
+  for (const citation of Array.isArray(value.citations) ? value.citations : []) {
+    if (!CITABLE_FIELDS.includes(citation?.field) || !requiredCitationSet.has(citation.field)) continue;
+    const urls = uniqueStrings(citation.evidenceUrls);
+    citationMap.set(citation.field, [...new Set([...(citationMap.get(citation.field) || []), ...urls])]);
+  }
+  const hasCurrentEvidence = value.evidence.some((evidence) => evidence.url === article.url);
+  if (hasCurrentEvidence) {
+    for (const field of requiredCitationFields) {
+      if (!citationMap.has(field) || citationMap.get(field).length === 0) citationMap.set(field, [article.url]);
+    }
+  }
+  value.citations = [...citationMap].map(([field, evidenceUrls]) => ({ field, evidenceUrls }));
+
+  const allowedEvidenceUrls = new Set(authority.keys());
+  const relationTargets = new Set(knownRelationTargetSlugs);
+  value.relations = (Array.isArray(value.relations) ? value.relations : []).filter((relation) => (
+    relation && typeof relation === "object"
+    && CONCEPT_RELATION_TYPES.includes(relation.type)
+    && relation.targetSlug !== concept.slug
+    && relationTargets.has(relation.targetSlug)
+    && chineseLed(relation.explanation)
+    && Array.isArray(relation.evidenceUrls)
+    && relation.evidenceUrls.length > 0
+    && relation.evidenceUrls.every((url) => allowedEvidenceUrls.has(url))
+  )).map((relation) => ({
+    ...relation,
+    explanation: String(relation.explanation).trim(),
+    evidenceUrls: uniqueStrings(relation.evidenceUrls),
+    confidence: Math.max(0, Math.min(1, Number(relation.confidence) || 0)),
+  }));
+
+  return value;
+}
+
 function normalizeIdentityPayload(payload, knownConcepts) {
   const decision = payload.identityDecision;
   const knownBySlug = new Map(knownConcepts.map((concept) => [concept.slug, concept]));
@@ -449,18 +662,38 @@ const RETRY_ERROR_GUIDANCE = {
     fields: "完整响应 JSON",
     action: "重新生成一次完整响应，不要附加 Markdown、解释文字或代码围栏。",
   },
+  json: {
+    category: "invalid-json",
+    fields: "完整响应 JSON",
+    action: "只输出一个完整 JSON 对象，不得使用 Markdown、代码围栏、前后说明或省略号。",
+  },
+  identity: {
+    category: "identity-contract",
+    fields: "identityDecision",
+    action: "身份动作、规范 slug、比较对象和置信度必须满足已知概念目录；不确定时使用 needs-review。",
+  },
 };
+
+function safeRetryFields(message, fallback) {
+  const fields = RETRY_SAFE_FIELDS.filter((field) => {
+    const leaf = field.split(".").at(-1);
+    return message.includes(field) || (leaf.length >= 4 && message.includes(leaf));
+  });
+  return fields.length > 0 ? [...new Set(fields)].join("、") : fallback;
+}
 
 function retryErrorGuidance(error) {
   const message = error instanceof Error ? error.message : String(error || "");
-  if (/证据|evidence|引用|citation|链接|URL|原标题|originalTitle|supports|主张|claim/iu.test(message)) {
-    return RETRY_ERROR_GUIDANCE.evidence;
-  }
-  if (/中文|汉字|Chinese/iu.test(message)) return RETRY_ERROR_GUIDANCE.chinese;
-  if (/关系|relation|targetSlug/iu.test(message)) return RETRY_ERROR_GUIDANCE.relation;
-  if (/theme|主题/iu.test(message)) return RETRY_ERROR_GUIDANCE.theme;
-  if (/HTTP|超时|timeout|响应未完成|返回空|被截断/iu.test(message)) return RETRY_ERROR_GUIDANCE.transport;
-  return RETRY_ERROR_GUIDANCE.structure;
+  let guidance;
+  if (/HTTP|超时|timeout|响应未完成|返回空|被截断/iu.test(message)) guidance = RETRY_ERROR_GUIDANCE.transport;
+  else if (/不是有效 JSON|invalid JSON/iu.test(message)) guidance = RETRY_ERROR_GUIDANCE.json;
+  else if (/中文|汉字|Chinese/iu.test(message)) guidance = RETRY_ERROR_GUIDANCE.chinese;
+  else if (/关系|relation|targetSlug/iu.test(message)) guidance = RETRY_ERROR_GUIDANCE.relation;
+  else if (/theme|主题/iu.test(message)) guidance = RETRY_ERROR_GUIDANCE.theme;
+  else if (/identityDecision|身份裁决|reuse-existing|create-new|needs-review/iu.test(message)) guidance = RETRY_ERROR_GUIDANCE.identity;
+  else if (/证据|evidence|引用|citation|链接|URL|原标题|originalTitle|supports|主张没有绑定|未知主张/iu.test(message)) guidance = RETRY_ERROR_GUIDANCE.evidence;
+  else guidance = RETRY_ERROR_GUIDANCE.structure;
+  return { ...guidance, fields: safeRetryFields(message, guidance.fields) };
 }
 
 function retryInstruction(error) {
@@ -482,7 +715,7 @@ function retryableHttpError(provider, response, body) {
 }
 
 async function requestDeepSeek(input, { model, correction = "", environment = process.env, fetchImpl = fetch } = {}) {
-  const maxTokens = Number(environment.RADAR_DEEPSEEK_CONCEPT_MAX_TOKENS || 12000);
+  const maxTokens = Number(environment.RADAR_DEEPSEEK_CONCEPT_MAX_TOKENS || 32000);
   if (!Number.isInteger(maxTokens) || maxTokens < 1600) throw new Error("RADAR_DEEPSEEK_CONCEPT_MAX_TOKENS 必须是不小于 1600 的整数");
   const response = await fetchImpl(deepSeekEndpoint(environment), {
     method: "POST",
@@ -500,6 +733,7 @@ async function requestDeepSeek(input, { model, correction = "", environment = pr
       ],
       response_format: { type: "json_object" },
       max_tokens: maxTokens,
+      temperature: 0.1,
     }),
     signal: AbortSignal.timeout(Number(environment.RADAR_DEEPSEEK_CONCEPT_TIMEOUT_MS || environment.RADAR_DEEPSEEK_TIMEOUT_MS || 120000)),
   });
@@ -567,7 +801,7 @@ export async function analyzeConceptKnowledgeArticle(article, {
   now = new Date().toISOString(),
   environment = process.env,
   fetchImpl = fetch,
-  maxAttempts = Number(environment.RADAR_CONCEPT_ANALYSIS_ATTEMPTS || 2),
+  maxAttempts = Number(environment.RADAR_CONCEPT_ANALYSIS_ATTEMPTS || 3),
 } = {}) {
   if (provider === "rules") throw new Error("概念知识分析需要配置 DeepSeek 或 OpenAI，不能使用 rules");
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 4) {
@@ -610,19 +844,20 @@ export async function analyzeConceptKnowledgeArticle(article, {
       const raw = provider === "deepseek"
         ? await requestDeepSeek(input, { model, correction, environment, fetchImpl })
         : await requestOpenAI(input, { model, correction, environment, fetchImpl });
-      let decoded;
-      try {
-        decoded = typeof raw === "string" ? JSON.parse(raw) : structuredClone(raw);
-      } catch {
-        throw new Error("概念知识输出不是有效 JSON");
-      }
+      const decoded = decodeProviderJson(raw);
       const isBatch = decoded && typeof decoded === "object" && Object.hasOwn(decoded, "concepts");
       if (isBatch && (!Array.isArray(decoded.concepts) || decoded.concepts.length === 0 || decoded.concepts.length > 8)) {
         throw new Error("概念知识 concepts 必须包含 1-8 个对象");
       }
       const rawPayloads = isBatch ? decoded.concepts : [decoded];
       const parsedPayloads = rawPayloads.map((value) => normalizeIdentityPayload(
-        parseConceptKnowledgeAnalysis(value, {
+        parseConceptKnowledgeAnalysis(normalizeProviderPayload(value, {
+          article: normalized,
+          existingKnowledge: activeExistingKnowledge,
+          knownConceptSlugs,
+          knownRelationTargetSlugs,
+          now,
+        }), {
           allowedEvidenceUrls: [...allowedEvidenceUrls],
           knownConceptSlugs,
           knownRelationTargetSlugs,

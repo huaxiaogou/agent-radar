@@ -2453,12 +2453,14 @@ test("public status exposes concept readiness counts and safely marks old snapsh
       articleUrl: "https://failure.example.com/agent-harness-repair",
       status: "failed",
       attemptedAt: "2026-08-03T12:34:56.000Z",
+      errorCategory: "relation-contract",
     };
     const unsafeFailure = {
       articleUrl: "https://failure.example.com/provider-retry?api_key=API_STATUS_QUERY_SECRET&token=API_STATUS_TOKEN_SECRET&signature=API_STATUS_SIGNATURE_SECRET#private-fragment",
       status: "failed",
       attemptedAt: "2026-08-03T12:35:56.000Z",
       error: "provider raw output contained API_STATUS_PROVIDER_SECRET",
+      errorCategory: "API_STATUS_PROVIDER_SECRET",
     };
     legacySnapshot.status.conceptReadiness.recentFailures = [safeFailure, unsafeFailure];
     await writeFile(snapshotPath, `${JSON.stringify(legacySnapshot, null, 2)}\n`, "utf8");
@@ -2477,6 +2479,11 @@ test("public status exposes concept readiness counts and safely marks old snapsh
       failedStatus.conceptReadiness.recentFailures?.[1]?.articleUrl,
       "https://failure.example.com/provider-retry",
       "/api/status 脱敏后仍需保留可定位的 HTTPS host+path",
+    );
+    assert.equal(
+      failedStatus.conceptReadiness.recentFailures?.[1]?.errorCategory,
+      undefined,
+      "/api/status 不得透传白名单之外的错误类别",
     );
 
     delete legacySnapshot.status.conceptReadiness;

@@ -324,6 +324,7 @@ export type ConceptReadiness = {
     articleUrl: string;
     status: string;
     attemptedAt: string | null;
+    errorCategory?: string;
   }>;
   corruptConceptCount: number | null;
   recoveredConceptCount: number | null;
