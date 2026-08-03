@@ -293,7 +293,8 @@ test("OpenAI concept adapter uses strict Responses JSON Schema and sanitizes cor
   assert.deepEqual(first.body.text?.format?.schema?.required, ["concepts"]);
   assert.deepEqual(
     first.body.text?.format?.schema?.properties?.concepts?.items?.required,
-    ["identityDecision", "concept", "claims", "evidence", "citations", "relations"],
+    ["identityDecision", "concept", "fields", "claims"],
+    "provider 只负责证据增量；权威证据、引文和关系不能交给模型生成",
   );
 
   const correction = String(requests[1].body.instructions || "");

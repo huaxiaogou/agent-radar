@@ -748,3 +748,33 @@
 - Operational failures now expose a fixed `errorCategory` through the backfill result, readiness snapshot, `concepts:check` and `/api/status`; raw SQLite `last_error`, model text, URL query/fragment and credentials remain internal.
 - Production acceptance remains open until the fixed commit is deployed, the failed backlog is rerun to `pending=0 / failed=0`, at least one formal concept passes readiness, and the documented manual dossier/evidence sample is completed.
 - Local verification after the repair: 277/277 unit/integration tests, 46/46 rendered-route contracts, lint, TypeScript and the Next.js production build all pass. Focused fixtures cover the six production failure families, safe retry convergence, fabricated-evidence rejection and operational redaction.
+
+## 2026-08-03 · Staged concept extraction optimization
+
+### Deviations
+
+- The initial design allowed one article to emit up to eight complete dossiers. Production achieved only 11/40 successful articles after two batches, so the implementation is being changed to a compact evidence extraction contract followed by deterministic local dossier assembly; the append-only revision and publication contracts remain unchanged.
+
+### Discovered edge cases
+
+- `concept_backfill_attempts` currently marks the whole claimed batch as `running` before the concurrency-limited workers start, and uses the batch claim time as completion time. This makes queued work indistinguishable from active provider calls and prevents trustworthy progress diagnosis.
+- A new concept can be evidence-sparse without being invalid, while a formal concept must still satisfy the existing multi-source public-quality gate. The staged adapter therefore needs sparse candidate semantics without weakening formal publication.
+
+### Questions for review
+
+- Production evidence is sufficient to cap per-article extraction at three concepts and exclude relation synthesis from the article pass. Relation enrichment can be reintroduced as a separate evidence-accumulation job when formal concept coverage is nonzero.
+
+### Completed implementation
+
+- Concept analysis now uses `concept-analyzer-v3`: the provider returns at most three compact evidence deltas, while the application attaches authoritative article metadata, claim support, field citations, existing dossier fields and existing relations locally. Evidence-poor release notes may return zero concepts and become a completed audit row instead of a permanent retry.
+- Sparse candidates may keep unsupported fields empty; formal publication still requires the existing complete engineering depth, publish evidence, field citations, atomic revision, lifecycle and independent-source gates. Fabricated URLs, English-led knowledge and invalid identities remain failures.
+- Backfill attempts become `running` only when a worker actually begins provider work. Per-article start/completion events expose safe URL, position, elapsed time and fixed error category; queued leased rows no longer look like active requests.
+- The compact response budget is 8K and both historical and incremental concept concurrency default to four. The public configuration and deployment documentation use the same values.
+
+### Final verification summary
+
+- Full unit/integration suite: 281/281.
+- Server-rendered route contracts: 46/46.
+- Next.js production build and TypeScript: passed.
+- ESLint, syntax checks and `git diff --check`: passed.
+- Production acceptance still requires deploying analyzer-v3, stopping or letting any analyzer-v2 foreground worker finish, rerunning the resumable concept backfill, passing `concepts:check`, and manually sampling the resulting candidates and formal dossiers.

@@ -19,7 +19,7 @@ export const CONCEPT_KNOWLEDGE_SCHEMA_VERSION = "concept-knowledge-v1";
 // v2 is the first extractor that can emit more than one independently
 // validated concept from a single article. Keeping the version explicit makes
 // deployment reprocess rows produced by the legacy single-concept analyzer.
-export const CONCEPT_ANALYZER_VERSION = "concept-analyzer-v2";
+export const CONCEPT_ANALYZER_VERSION = "concept-analyzer-v3";
 
 const REQUIRED_CONCEPT_TEXT = [
   "canonicalName", "definition", "nonDefinition", "problem", "whyNow", "origin",
@@ -261,8 +261,12 @@ function validateShape(value, { allowLegacySparseCoreArrays = false, requireIden
   const concept = value.concept;
   concept.themes = normalizeEngineeringThemes(concept.themes, { allowMissing: true });
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(String(concept.slug || ""))) throw new Error("概念 slug 无效");
+  const sparseCandidate = String(concept.stage || "").toLowerCase() === "candidate";
   for (const field of REQUIRED_CONCEPT_TEXT) {
-    if (typeof concept[field] !== "string" || !concept[field].trim()) throw new Error(`概念知识缺少 ${field}`);
+    if (typeof concept[field] !== "string") throw new Error(`概念知识 ${field} 必须是字符串`);
+    if (!concept[field].trim() && (!sparseCandidate || ["canonicalName", "dailyDelta", "lastMeaningfulChange"].includes(field))) {
+      throw new Error(`概念知识缺少 ${field}`);
+    }
   }
   for (const field of REQUIRED_CONCEPT_ARRAYS) {
     if (!Array.isArray(concept[field])) throw new Error(`概念知识 ${field} 必须是数组`);
@@ -270,7 +274,7 @@ function validateShape(value, { allowLegacySparseCoreArrays = false, requireIden
       if (typeof item !== "string" || !item.trim()) throw new Error(`概念知识 ${field} 含空白项：${index + 1}`);
     }
   }
-  if (!allowLegacySparseCoreArrays && CORE_CONCEPT_ARRAYS.every((field) => concept[field].length === 0)) {
+  if (!allowLegacySparseCoreArrays && !sparseCandidate && CORE_CONCEPT_ARRAYS.every((field) => concept[field].length === 0)) {
     throw new Error("核心工程知识不能全部为空，概念不能是空壳");
   }
   for (const field of CORE_CONCEPT_ARRAYS) {
@@ -279,7 +283,7 @@ function validateShape(value, { allowLegacySparseCoreArrays = false, requireIden
     }
   }
   for (const field of CHINESE_FIELDS) {
-    if (!chineseLed(concept[field])) throw new Error(`${field} 必须是中文主导内容`);
+    if (concept[field] && !chineseLed(concept[field])) throw new Error(`${field} 必须是中文主导内容`);
   }
   const claimKeys = new Set();
   for (const claim of value.claims) {
@@ -311,7 +315,7 @@ function validateShape(value, { allowLegacySparseCoreArrays = false, requireIden
     if (!supported.has(key)) throw new Error(`主张没有绑定证据：${key}`);
   }
   const requiredCitationFields = new Set([
-    ...CITABLE_TEXT_FIELDS,
+    ...CITABLE_TEXT_FIELDS.filter((field) => nonEmptyKnowledgeField(concept[field])),
     ...CITABLE_ARRAY_FIELDS.filter((field) => Array.isArray(concept[field]) && concept[field].length > 0),
   ]);
   const citedFields = new Set();
@@ -1689,7 +1693,7 @@ async function mapLimit(values, limit, mapper) {
     while (cursor < values.length) {
       const index = cursor;
       cursor += 1;
-      output[index] = await mapper(values[index]);
+      output[index] = await mapper(values[index], index);
     }
   }
   await Promise.all(Array.from({ length: Math.min(values.length, limit) }, worker));
@@ -1710,7 +1714,7 @@ function analyzedPayloads(analyzed) {
     : Array.isArray(analyzed)
       ? analyzed
       : [analyzed?.payload || analyzed];
-  if (values.length < 1 || values.length > 8) throw new Error("概念回填每篇文章必须产生 1-8 个概念对象");
+  if (values.length > 8) throw new Error("概念回填每篇文章最多产生 8 个概念对象");
   const slugs = new Set();
   for (const value of values) {
     const slug = String(value?.concept?.slug || "").trim();
@@ -1778,6 +1782,7 @@ export async function runConceptKnowledgeBackfill({
   knowledgeSchemaVersion = CONCEPT_KNOWLEDGE_SCHEMA_VERSION,
   analyzerVersion = CONCEPT_ANALYZER_VERSION,
   leaseMs = Number(process.env.RADAR_CONCEPT_BACKFILL_LEASE_MS || 15 * 60 * 1000),
+  onProgress = null,
 } = {}) {
   if (!database || typeof database.prepare !== "function") throw new Error("概念回填需要有效 database");
   if (typeof analyzeArticle !== "function") throw new Error("概念回填需要 analyzeArticle");
@@ -1785,6 +1790,7 @@ export async function runConceptKnowledgeBackfill({
   const workers = Number(concurrency);
   if (!Number.isInteger(limit) || limit < 1 || !Number.isInteger(workers) || workers < 1) throw new Error("概念回填 batchSize/concurrency 必须是正整数");
   if (!Number.isFinite(Number(leaseMs)) || Number(leaseMs) < 1_000) throw new Error("概念回填 leaseMs 必须不小于 1000");
+  if (onProgress != null && typeof onProgress !== "function") throw new Error("概念回填 onProgress 必须是函数");
   const schemaVersion = String(knowledgeSchemaVersion || "").trim();
   const extractorVersion = String(analyzerVersion || "").trim();
   if (!schemaVersion || !extractorVersion) throw new Error("概念回填 knowledgeSchemaVersion/analyzerVersion 不能为空");
@@ -1831,6 +1837,12 @@ export async function runConceptKnowledgeBackfill({
     isCompletedBackfillBoundary(state.get(row.url), row, schemaVersion, extractorVersion)
   ));
   const candidates = [];
+  const insertAttempt = database.prepare(`
+    INSERT INTO concept_backfill_attempts
+      (article_url, content_hash, input_contract_hash, knowledge_schema_version, analyzer_version,
+       owner_token, status, attempted_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'running', ?)
+  `);
   database.exec("BEGIN IMMEDIATE");
   try {
     const lease = database.prepare("SELECT content_hash, owner_token, lease_expires_at FROM concept_backfill_leases WHERE article_url = ?");
@@ -1848,12 +1860,6 @@ export async function runConceptKnowledgeBackfill({
       SET status = 'superseded', completed_at = ?, last_error = 'lease superseded by a newer backfill attempt'
       WHERE article_url = ? AND owner_token = ? AND status = 'running'
     `);
-    const insertAttempt = database.prepare(`
-      INSERT INTO concept_backfill_attempts
-        (article_url, content_hash, input_contract_hash, knowledge_schema_version, analyzer_version,
-         owner_token, status, attempted_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'running', ?)
-    `);
     for (const row of rows) {
       if (candidates.length >= limit) break;
       const item = state.get(row.url);
@@ -1864,10 +1870,7 @@ export async function runConceptKnowledgeBackfill({
       const ownerToken = randomUUID();
       const inputContractHash = conceptArticleInputContractHash(row);
       claim.run(row.url, row.content_hash, ownerToken, claimedAt, leaseExpiresAt);
-      const inserted = insertAttempt.run(
-        row.url, row.content_hash, inputContractHash, schemaVersion, extractorVersion, ownerToken, claimedAt,
-      );
-      candidates.push({ ...row, inputContractHash, ownerToken, attemptId: Number(inserted.lastInsertRowid) });
+      candidates.push({ ...row, inputContractHash, ownerToken });
     }
     database.exec("COMMIT");
   } catch (error) {
@@ -1875,7 +1878,57 @@ export async function runConceptKnowledgeBackfill({
     throw error;
   }
 
-  const results = await mapLimit(candidates, workers, async (row) => {
+  const notify = (event) => {
+    if (typeof onProgress !== "function") return;
+    try { onProgress(event); } catch { /* progress observers cannot change authoritative work */ }
+  };
+  const results = await mapLimit(candidates, workers, async (row, index) => {
+    const workerStartedAt = new Date().toISOString();
+    const workerStartedMs = Date.now();
+    const articleUrl = safeOperationalArticleUrl(row.url);
+    const report = (result) => {
+      notify({
+        phase: "completed",
+        articleUrl,
+        articleIndex: index + 1,
+        batchSize: candidates.length,
+        status: result.status,
+        errorCategory: result.status === "failed"
+          ? conceptAnalysisFailureCategory(result.error, result.status)
+          : null,
+        elapsedMs: Math.max(0, Date.now() - workerStartedMs),
+        completedAt: new Date().toISOString(),
+      });
+      return result;
+    };
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      const activeLease = database.prepare(`
+        SELECT owner_token, content_hash
+        FROM concept_backfill_leases
+        WHERE article_url = ?
+      `).get(row.url);
+      if (!activeLease || activeLease.owner_token !== row.ownerToken || activeLease.content_hash !== row.content_hash) {
+        database.exec("COMMIT");
+        return report({ url: row.url, status: "superseded" });
+      }
+      const inserted = insertAttempt.run(
+        row.url, row.content_hash, row.inputContractHash, schemaVersion, extractorVersion, row.ownerToken, workerStartedAt,
+      );
+      row.attemptId = Number(inserted.lastInsertRowid);
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+    notify({
+      phase: "started",
+      articleUrl,
+      articleIndex: index + 1,
+      batchSize: candidates.length,
+      status: "running",
+      startedAt: workerStartedAt,
+    });
     try {
       const analyzed = await analyzeArticle(row);
       const incomingPayloads = analyzedPayloads(analyzed);
@@ -1883,13 +1936,14 @@ export async function runConceptKnowledgeBackfill({
       try {
         const lease = database.prepare("SELECT owner_token, content_hash FROM concept_backfill_leases WHERE article_url = ?").get(row.url);
         if (!lease || lease.owner_token !== row.ownerToken || lease.content_hash !== row.content_hash) {
+          const finishedAt = new Date().toISOString();
           database.prepare(`
             UPDATE concept_backfill_attempts
             SET status = 'superseded', completed_at = ?, last_error = 'lease ownership changed before commit'
             WHERE id = ? AND status = 'running'
-          `).run(claimedAt, row.attemptId);
+          `).run(finishedAt, row.attemptId);
           database.exec("COMMIT");
-          return { url: row.url, status: "superseded" };
+          return report({ url: row.url, status: "superseded" });
         }
         const currentRow = database.prepare(`
           SELECT content_hash, content_roles_json, publish_decision
@@ -1900,11 +1954,12 @@ export async function runConceptKnowledgeBackfill({
           || !["publish", "watch"].includes(currentRow.publish_decision)
           || conceptArticleInputContractHash(currentRow) !== row.inputContractHash) {
           const message = "article input contract changed during analysis";
+          const finishedAt = new Date().toISOString();
           database.prepare(`
             UPDATE concept_backfill_attempts
             SET status = 'conflict', completed_at = ?, last_error = ?
             WHERE id = ? AND status = 'running'
-          `).run(claimedAt, message, row.attemptId);
+          `).run(finishedAt, message, row.attemptId);
           database.prepare(`
             INSERT INTO concept_backfill
               (article_url, content_hash, input_contract_hash, knowledge_schema_version, analyzer_version, status,
@@ -1920,11 +1975,11 @@ export async function runConceptKnowledgeBackfill({
               current_attempt_id = excluded.current_attempt_id
           `).run(
             row.url, row.content_hash, row.inputContractHash, schemaVersion, extractorVersion,
-            claimedAt, message, row.attemptId,
+            workerStartedAt, message, row.attemptId,
           );
           database.prepare("DELETE FROM concept_backfill_leases WHERE article_url = ? AND owner_token = ?").run(row.url, row.ownerToken);
           database.exec("COMMIT");
-          return { url: row.url, status: "conflict", error: message };
+          return report({ url: row.url, status: "conflict", error: message });
         }
 
         const metadata = (analyzed && typeof analyzed === "object" && !Array.isArray(analyzed)) ? analyzed : {};
@@ -1941,14 +1996,15 @@ export async function runConceptKnowledgeBackfill({
           const applied = applyConceptKnowledgeRevision(database, merged, {
             provider: metadata.provider || incoming?.analysisMetadata?.provider || "injected",
             model: metadata.model || incoming?.analysisMetadata?.model || "injected",
-            analyzedAt: metadata.analyzedAt || incoming?.analysisMetadata?.analyzedAt || claimedAt,
+            analyzedAt: metadata.analyzedAt || incoming?.analysisMetadata?.analyzedAt || workerStartedAt,
             reason: metadata.reason || "历史概念证据回溯",
             knownIdentitySlugs: metadata.knownIdentitySlugs || [],
             transactional: false,
           });
           appliedOutputs.push({ slug: applied.slug, revision: applied.revision });
         }
-        const first = appliedOutputs[0];
+        const first = appliedOutputs[0] || null;
+        const finishedAt = new Date().toISOString();
         database.prepare(`
           INSERT INTO concept_backfill
             (article_url, content_hash, input_contract_hash, knowledge_schema_version, analyzer_version, status,
@@ -1965,7 +2021,7 @@ export async function runConceptKnowledgeBackfill({
             current_attempt_id = excluded.current_attempt_id
         `).run(
           row.url, row.content_hash, row.inputContractHash, schemaVersion, extractorVersion,
-          claimedAt, claimedAt, first.slug, first.revision, row.attemptId,
+          workerStartedAt, finishedAt, first?.slug || null, first?.revision || null, row.attemptId,
         );
         const insertOutput = database.prepare(`
           INSERT INTO concept_backfill_outputs (attempt_id, output_index, concept_slug, revision)
@@ -1978,16 +2034,17 @@ export async function runConceptKnowledgeBackfill({
           UPDATE concept_backfill_attempts
           SET status = 'completed', completed_at = ?, last_error = NULL
           WHERE id = ? AND status = 'running'
-        `).run(claimedAt, row.attemptId);
+        `).run(finishedAt, row.attemptId);
         database.prepare("DELETE FROM concept_backfill_leases WHERE article_url = ? AND owner_token = ?").run(row.url, row.ownerToken);
         database.exec("COMMIT");
-        return { url: row.url, status: "updated", outputs: appliedOutputs };
+        return report({ url: row.url, status: "updated", outputs: appliedOutputs });
       } catch (error) {
         database.exec("ROLLBACK");
         throw error;
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const finishedAt = new Date().toISOString();
       let releasedOwnLease = false;
       database.exec("BEGIN IMMEDIATE");
       try {
@@ -1998,7 +2055,7 @@ export async function runConceptKnowledgeBackfill({
             UPDATE concept_backfill_attempts
             SET status = 'failed', completed_at = ?, last_error = ?
             WHERE id = ? AND status = 'running'
-          `).run(claimedAt, message, row.attemptId);
+          `).run(finishedAt, message, row.attemptId);
           database.prepare(`
             INSERT INTO concept_backfill
               (article_url, content_hash, input_contract_hash, knowledge_schema_version, analyzer_version, status,
@@ -2014,14 +2071,14 @@ export async function runConceptKnowledgeBackfill({
               current_attempt_id = excluded.current_attempt_id
           `).run(
             row.url, row.content_hash, row.inputContractHash, schemaVersion, extractorVersion,
-            claimedAt, message, row.attemptId,
+            workerStartedAt, message, row.attemptId,
           );
         } else {
           database.prepare(`
             UPDATE concept_backfill_attempts
             SET status = 'superseded', completed_at = ?, last_error = ?
             WHERE id = ? AND status = 'running'
-          `).run(claimedAt, message, row.attemptId);
+          `).run(finishedAt, message, row.attemptId);
         }
         database.exec("COMMIT");
       } catch (releaseError) {
@@ -2029,8 +2086,8 @@ export async function runConceptKnowledgeBackfill({
         throw releaseError;
       }
       // 租约已经被更新的 owner 取代时，旧 owner 的失败不能污染权威 backlog 状态。
-      if (!releasedOwnLease) return { url: row.url, status: "superseded" };
-      return { url: row.url, status: "failed", error: message };
+      if (!releasedOwnLease) return report({ url: row.url, status: "superseded" });
+      return report({ url: row.url, status: "failed", error: message });
     }
   });
   const processedCount = results.filter((item) => item.status === "updated").length;

@@ -530,10 +530,11 @@ test("strict concept schema requires an auditable identity decision and supplies
 
   const batchSchema = requests[0].text?.format?.schema;
   const schema = batchSchema?.properties?.concepts?.items;
-  assert.equal(batchSchema?.properties?.concepts?.minItems, 1);
-  assert.equal(batchSchema?.properties?.concepts?.maxItems, 8);
+  assert.equal(batchSchema?.properties?.concepts?.minItems, 0, "证据不足的普通更新必须允许明确返回零概念");
+  assert.equal(batchSchema?.properties?.concepts?.maxItems, 3, "单篇文章只提取少量独立知识增量，不能要求模型一次生成八份 dossier");
   assert.ok(schema?.properties?.identityDecision, "批量严格 provider schema 的每个概念都必须声明 identityDecision，而不是只在提示词中口头要求");
   assert.ok(schema.required.includes("identityDecision"), "每个新知识分析结果都必须产生可审计身份裁决");
+  assert.deepEqual(schema.required, ["identityDecision", "concept", "fields", "claims"]);
   assert.deepEqual(
     schema.properties.identityDecision.properties.action.enum,
     ["reuse-existing", "create-new", "needs-review"],

@@ -224,6 +224,77 @@ function applyKnowledge(database, payload, analyzedAt = "2026-08-03T02:00:00.000
   });
 }
 
+test("backfill exposes only active workers as running and emits per-article progress", async () => {
+  const directory = await temporaryDataDirectory("agent-radar-concept-progress-");
+  process.env.RADAR_DATA_DIR = directory;
+  const operationsSource = source("concept-progress-source");
+  const database = openDatabase();
+  upsertSourceCatalog(database, [operationsSource]);
+  const firstEvidence = insertEvidenceArticle(database, operationsSource, "progress-first");
+  const secondEvidence = insertEvidenceArticle(database, operationsSource, "progress-second");
+  const events = [];
+  let releaseFirst;
+  let markFirstStarted;
+  const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+  let calls = 0;
+
+  const running = runConceptKnowledgeBackfill({
+    database,
+    articleUrls: [firstEvidence.url, secondEvidence.url],
+    batchSize: 2,
+    concurrency: 1,
+    onProgress: (event) => events.push(event),
+    analyzeArticle: async (article) => {
+      calls += 1;
+      if (calls === 1) {
+        markFirstStarted();
+        await firstGate;
+      }
+      const evidence = {
+        url: article.url,
+        originalTitle: article.original_title,
+        sourceName: article.source_name,
+        sourceLayer: article.source_layer,
+        independentGroup: article.independent_group,
+        publishedAt: article.published_at,
+      };
+      return knowledgePayload({
+        slug: `progress-concept-${calls}`,
+        canonicalName: `进度概念${calls}`,
+        evidence: [evidence],
+      });
+    },
+  });
+  await firstStarted;
+
+  assert.equal(
+    Number(database.prepare("SELECT COUNT(*) AS count FROM concept_backfill_attempts WHERE status = 'running'").get().count),
+    1,
+    "并发 1 时只有正在调用 provider 的文章可以标记 running，已领取但排队的文章不能伪装成活跃请求",
+  );
+  assert.equal(
+    Number(database.prepare("SELECT COUNT(*) AS count FROM concept_backfill_leases").get().count),
+    2,
+    "整批租约仍可预先占用以防重叠 worker，但租约与运行状态必须分开",
+  );
+  assert.deepEqual(events.map((event) => event.phase), ["started"]);
+
+  releaseFirst();
+  const result = await running;
+  assert.equal(result.processedCount, 2);
+  assert.deepEqual(events.map((event) => event.phase), ["started", "completed", "started", "completed"]);
+  assert.ok(events.filter((event) => event.phase === "completed").every((event) => Number.isFinite(event.elapsedMs)));
+  const attempts = database.prepare(`
+    SELECT status, attempted_at, completed_at
+    FROM concept_backfill_attempts
+    ORDER BY id
+  `).all();
+  assert.equal(attempts.length, 2);
+  assert.ok(attempts.every((attempt) => attempt.status === "completed" && attempt.completed_at >= attempt.attempted_at));
+  database.close();
+});
+
 function markBackfillCompleted(database, evidence, conceptSlug, revision = 1) {
   const statement = database.prepare(`
     INSERT INTO concept_backfill
@@ -581,13 +652,14 @@ test("OpenAI concept adapter sends a strict Responses schema and honors model, t
   assert.equal(body.store, false);
   assert.equal(body.text?.format?.type, "json_schema");
   assert.equal(body.text?.format?.strict, true);
-  assert.equal(body.text?.format?.name, "agent_radar_concept_knowledge_batch");
+  assert.equal(body.text?.format?.name, "agent_radar_concept_evidence_batch");
   assert.deepEqual(body.text?.format?.schema?.required, ["concepts"]);
   assert.deepEqual(
     body.text?.format?.schema?.properties?.concepts?.items?.required,
-    ["identityDecision", "concept", "claims", "evidence", "citations", "relations"],
-    "OpenAI batch 中的每个概念仍必须遵守完整严格知识契约",
+    ["identityDecision", "concept", "fields", "claims"],
+    "OpenAI batch 必须使用紧凑证据提取契约，权威证据与引文由本地系统组装",
   );
+  assert.equal(body.text?.format?.schema?.properties?.concepts?.maxItems, 3);
   assert.ok(init.signal instanceof AbortSignal, "请求必须携带由 RADAR_OPENAI_CONCEPT_TIMEOUT_MS 控制的 AbortSignal");
 
   const timeoutStartedAt = Date.now();

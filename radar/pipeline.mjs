@@ -446,9 +446,14 @@ export async function runIngestion({
           database,
           analyzeArticle,
           batchSize: conceptArticleUrls.length,
-          concurrency: Number(process.env.RADAR_CONCEPT_ANALYSIS_CONCURRENCY || 2),
+          concurrency: Number(process.env.RADAR_CONCEPT_ANALYSIS_CONCURRENCY || 4),
           now: new Date().toISOString(),
           articleUrls: conceptArticleUrls,
+          onProgress: (event) => {
+            const category = event.errorCategory ? ` category=${event.errorCategory}` : "";
+            const elapsed = event.phase === "completed" ? ` elapsedMs=${event.elapsedMs}` : "";
+            logger.info?.(`[concept:${event.articleIndex}/${event.batchSize}] ${event.phase === "started" ? "started" : event.status}${elapsed}${category} ${event.articleUrl}`);
+          },
         });
         conceptUpdatedCount = Number(conceptResult.processedCount || 0);
         conceptSkippedCount = Number(conceptResult.skippedCount || 0);

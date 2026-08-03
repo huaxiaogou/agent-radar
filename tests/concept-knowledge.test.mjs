@@ -881,6 +881,164 @@ test("concept analyzer retry correction exposes only fixed error categories and 
   assert.doesNotMatch(correction, /https?:\/\//iu, "修正提示本身不得包含首轮模型输出的任何可执行 URL");
 });
 
+test("compact concept extraction locally assembles authoritative evidence, citations and sparse candidate knowledge", async () => {
+  const { analyzeConceptKnowledgeArticle } = await import("../radar/concept-analyze.mjs");
+  const sourceUrl = "https://vendor-alpha.example.com/engineering/compact-evidence-extraction";
+  const originalTitle = "Compact evidence extraction for resumable agent tasks";
+  const article = {
+    url: sourceUrl,
+    sourceId: SOURCES.vendorBlog.id,
+    sourceName: SOURCES.vendorBlog.name,
+    sourceClass: SOURCES.vendorBlog.class,
+    sourceLayer: SOURCES.vendorBlog.layer,
+    independentGroup: SOURCES.vendorBlog.independentGroup,
+    sourceLanguage: "en",
+    originalTitle,
+    originalExcerpt: "The release documents a checkpoint before external side effects.",
+    contentText: "The executor persists a checkpoint before external side effects and verifies the recovered result.",
+    publishedAt: "2026-08-03T06:00:00.000Z",
+  };
+  const fields = {
+    definition: "",
+    nonDefinition: "",
+    problem: "",
+    whyNow: "",
+    origin: "",
+    mechanism: "执行器在外部副作用前持久化检查点，并在恢复后重新验证执行结果。",
+    architecture: "",
+    dailyDelta: "本篇证据新增了副作用前检查点与恢复后验证的实现约束。",
+    evolution: [],
+    designConstraints: ["检查点提交必须发生在外部副作用之前。"],
+    implementationPatterns: ["恢复流程重新执行结果验证，而不是只恢复进程。"],
+    antiPatterns: [],
+    tradeoffs: [],
+    failureModes: [],
+    securityRisks: [],
+    operationalConcerns: [],
+    applicability: [],
+    nonApplicability: [],
+    controversies: [],
+  };
+  const compact = {
+    identityDecision: {
+      action: "create-new",
+      canonicalSlug: "checkpoint-verification-loop",
+      confidence: 0.91,
+      reason: "该机制同时约束副作用前检查点和恢复后验证，具备独立实现与验收边界。",
+      comparedSlugs: [],
+    },
+    concept: {
+      slug: "checkpoint-verification-loop",
+      canonicalName: "Checkpoint Verification Loop",
+      aliases: ["检查点验证闭环"],
+      themes: ["agent-runtime"],
+    },
+    fields,
+    claims: [{
+      key: "checkpoint-before-side-effect",
+      text: "执行器必须在外部副作用之前提交可恢复检查点。",
+      kind: "mechanism",
+      confidence: 0.9,
+    }],
+  };
+  let request;
+  const analyzed = await analyzeConceptKnowledgeArticle(article, {
+    provider: "deepseek",
+    knownConcepts: [],
+    now: "2026-08-03T06:30:00.000Z",
+    maxAttempts: 1,
+    environment: {
+      DEEPSEEK_API_KEY: "compact-extraction-test-key",
+      RADAR_DEEPSEEK_CONCEPT_MODEL: "deepseek-compact-test",
+      RADAR_DEEPSEEK_CONCEPT_TIMEOUT_MS: "10000",
+    },
+    fetchImpl: async (_input, init = {}) => {
+      request = JSON.parse(String(init.body || "{}"));
+      return new Response(JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ concepts: [compact] }) } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  assert.equal(analyzed.length, 1);
+  const [payload] = analyzed;
+  assert.equal(payload.concept.stage, "candidate", "单篇新概念必须先进入候选，不得由模型直接晋升");
+  assert.equal(payload.concept.definition, "", "无证据字段必须保持真正稀疏，不能生成通用填充话术");
+  assert.equal(payload.concept.mechanism, fields.mechanism);
+  assert.deepEqual(payload.relations, [], "文章证据提取阶段不得同时生成概念关系");
+  assert.deepEqual(payload.evidence.map((item) => item.url), [sourceUrl]);
+  assert.equal(payload.evidence[0].originalTitle, originalTitle, "证据元数据必须来自权威文章而不是模型");
+  assert.ok(payload.claims[0].key.startsWith("checkpoint-before-side-effect-"), "主张 key 必须按文章和语义确定性命名以避免历史冲突");
+  assert.ok(payload.citations.some((item) => item.field === "mechanism" && item.evidenceUrls[0] === sourceUrl));
+  assert.ok(payload.citations.some((item) => item.field === "dailyDelta" && item.evidenceUrls[0] === sourceUrl));
+  assert.match(request.messages[0].content, /只做文章证据提取/u);
+  assert.equal(request.max_tokens, 8000, "紧凑提取不得继续使用 32K 的完整 dossier 输出预算");
+});
+
+test("analyzer can mark an evidence-poor release article complete with zero fabricated concepts", async () => {
+  const { analyzeConceptKnowledgeArticle } = await import("../radar/concept-analyze.mjs");
+  const analyzed = await analyzeConceptKnowledgeArticle({
+    url: "https://github.com/vendor-alpha/runtime/releases/tag/v1.0.1",
+    sourceId: SOURCES.vendorRepo.id,
+    sourceName: SOURCES.vendorRepo.name,
+    sourceClass: SOURCES.vendorRepo.class,
+    sourceLayer: SOURCES.vendorRepo.layer,
+    independentGroup: SOURCES.vendorRepo.independentGroup,
+    sourceLanguage: "en",
+    originalTitle: "v1.0.1",
+    contentText: "Dependency updates and typo fixes.",
+    publishedAt: "2026-08-03T06:00:00.000Z",
+  }, {
+    provider: "deepseek",
+    knownConcepts: [],
+    maxAttempts: 1,
+    environment: {
+      DEEPSEEK_API_KEY: "empty-concepts-test-key",
+      RADAR_DEEPSEEK_CONCEPT_MODEL: "deepseek-compact-test",
+      RADAR_DEEPSEEK_CONCEPT_TIMEOUT_MS: "10000",
+    },
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ concepts: [] }) } }],
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+  assert.deepEqual(analyzed, []);
+});
+
+test("backfill records a zero-concept extraction as completed and does not retry the evidence-poor article", async () => {
+  const { getConceptBackfillAudit, runConceptKnowledgeBackfill } = await knowledgeApi(
+    "getConceptBackfillAudit",
+    "runConceptKnowledgeBackfill",
+  );
+  const database = await createDatabase();
+  try {
+    upsertSourceCatalog(database, [SOURCES.vendorRepo]);
+    const url = insertEvidenceArticle(database, SOURCES.vendorRepo, {
+      suffix: "release-without-concept",
+      originalTitle: "Dependency and typo maintenance release",
+    });
+    let calls = 0;
+    const first = await runConceptKnowledgeBackfill({
+      database,
+      articleUrls: [url],
+      batchSize: 1,
+      analyzeArticle: async () => { calls += 1; return []; },
+    });
+    assert.equal(first.processedCount, 1);
+    assert.deepEqual(getConceptBackfillAudit(database, url)?.outputs, []);
+    const second = await runConceptKnowledgeBackfill({
+      database,
+      articleUrls: [url],
+      batchSize: 1,
+      analyzeArticle: async () => { calls += 1; return []; },
+    });
+    assert.equal(second.processedCount, 0);
+    assert.equal(second.skippedCount, 1);
+    assert.equal(calls, 1, "零概念是有效分析结论，不得在每轮定时任务中重复消耗模型");
+  } finally {
+    database.close();
+  }
+});
+
 test("DeepSeek concept adapter repairs bounded mechanical drift without weakening evidence gates", async () => {
   const { analyzeConceptKnowledgeArticle } = await import("../radar/concept-analyze.mjs");
   const sourceUrl = "https://vendor-alpha.example.com/engineering/bounded-concept-repair";

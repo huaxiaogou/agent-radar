@@ -236,7 +236,7 @@ export function openDatabase() {
       content_hash TEXT NOT NULL,
       input_contract_hash TEXT,
       knowledge_schema_version TEXT NOT NULL DEFAULT 'concept-knowledge-v1',
-      analyzer_version TEXT NOT NULL DEFAULT 'concept-analyzer-v2',
+      analyzer_version TEXT NOT NULL DEFAULT 'concept-analyzer-v3',
       status TEXT NOT NULL CHECK(status IN ('completed', 'failed', 'conflict')),
       attempted_at TEXT NOT NULL,
       completed_at TEXT,

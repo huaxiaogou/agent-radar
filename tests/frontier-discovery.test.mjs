@@ -84,7 +84,7 @@ function deepSeekRequestText(request) {
 function isConceptKnowledgeRequest(request) {
   const system = String(request.messages?.find((message) => message.role === "system")?.content || request.instructions || "");
   return system.includes("证据型知识编辑")
-    && system.includes("输出 concepts 数组");
+    && system.includes("本轮只做文章证据提取");
 }
 
 function conceptSourceFromRequest(request) {
@@ -131,7 +131,6 @@ function conceptKnowledgeAnalysis(source) {
     dailyDelta: "本次仅新增一条值得跟踪的候选证据，尚未形成可公开确认的成熟概念。",
     lastMeaningfulChange: new Date().toISOString(),
   };
-  const citedFields = ["definition", "nonDefinition", "problem", "whyNow", "origin", "mechanism", "architecture", "dailyDelta"];
   return {
     identityDecision: {
       action: "create-new",
@@ -140,7 +139,33 @@ function conceptKnowledgeAnalysis(source) {
       reason: "当前候选描述了可独立命名、实现和继续验证的工程机制，且与已知概念不存在精确身份冲突。",
       comparedSlugs: ["coding-agent", "agent-harness"],
     },
-    concept,
+    concept: {
+      slug: concept.slug,
+      canonicalName: concept.canonicalName,
+      aliases: concept.aliases,
+      themes: concept.themes,
+    },
+    fields: {
+      definition: concept.definition,
+      nonDefinition: concept.nonDefinition,
+      problem: concept.problem,
+      whyNow: concept.whyNow,
+      origin: concept.origin,
+      mechanism: concept.mechanism,
+      architecture: concept.architecture,
+      dailyDelta: concept.dailyDelta,
+      evolution: concept.evolution,
+      designConstraints: concept.designConstraints,
+      implementationPatterns: concept.implementationPatterns,
+      antiPatterns: concept.antiPatterns,
+      tradeoffs: concept.tradeoffs,
+      failureModes: concept.failureModes,
+      securityRisks: concept.securityRisks,
+      operationalConcerns: concept.operationalConcerns,
+      applicability: concept.applicability,
+      nonApplicability: concept.nonApplicability,
+      controversies: concept.controversies,
+    },
     claims: [{
       key: claimKey,
       text: isResearch
@@ -149,18 +174,6 @@ function conceptKnowledgeAnalysis(source) {
       kind: isResearch ? "mechanism" : "pattern",
       confidence: 0.62,
     }],
-    evidence: [{
-      url: source.url,
-      originalTitle: source.originalTitle,
-      sourceName: source.sourceName,
-      sourceLayer: source.sourceLayer,
-      independentGroup: source.independentGroup,
-      supports: [claimKey],
-      stance: "support",
-      publishedAt: source.publishedAt,
-    }],
-    citations: citedFields.map((field) => ({ field, evidenceUrls: [source.url] })),
-    relations: [],
   };
 }
 

@@ -64,7 +64,7 @@ const batchSize = positiveInteger(
 const concurrency = positiveInteger(
   optionValue("--concurrency") || process.env.RADAR_CONCEPT_BACKFILL_CONCURRENCY,
   "RADAR_CONCEPT_BACKFILL_CONCURRENCY",
-  2,
+  4,
 );
 const maxBatches = positiveInteger(optionValue("--max-batches"), "--max-batches", 10000);
 const articleUrls = optionValues("--url");
@@ -101,6 +101,7 @@ try {
   let noProgress = false;
   let batches = 0;
   while (hasMore && batches < maxBatches) {
+    const batchNumber = batches + 1;
     const result = await runConceptKnowledgeBackfill({
       database,
       analyzeArticle,
@@ -108,6 +109,15 @@ try {
       concurrency,
       now: new Date().toISOString(),
       ...(articleUrls.length ? { articleUrls: remainingArticleUrls } : {}),
+      onProgress: (event) => {
+        const position = `${event.articleIndex}/${event.batchSize}`;
+        if (event.phase === "started") {
+          console.error(`[concepts:backfill] batch=${batchNumber} article=${position} started ${event.articleUrl}`);
+          return;
+        }
+        const category = event.errorCategory ? ` category=${event.errorCategory}` : "";
+        console.error(`[concepts:backfill] batch=${batchNumber} article=${position} ${event.status} elapsedMs=${event.elapsedMs}${category} ${event.articleUrl}`);
+      },
       // --url is an explicit repair command: every requested URL remains
       // forced until it has been claimed in a batch. Lease ownership and the
       // post-analysis article content-hash CAS remain mandatory.

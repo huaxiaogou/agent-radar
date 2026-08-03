@@ -384,11 +384,12 @@ test("P2 contract: concept readiness exposes at most ten safe current failed/con
       });
       assert.equal(result.failedCount, 1, "fixture 必须通过真实 backfill 失败路径写入 state、attempt 与 input contract hash");
       const state = database.prepare(`
-        SELECT input_contract_hash
+        SELECT input_contract_hash, attempted_at
         FROM concept_backfill
         WHERE article_url = ?
       `).get(evidence.url);
       assert.match(state?.input_contract_hash || "", /^[a-f0-9]{64}$/u, "当前失败 fixture 不能使用 NULL/伪造 input_contract_hash");
+      return state;
     };
     const expectedNewestFirst = [];
     for (let index = 0; index < 12; index += 1) {
@@ -396,12 +397,12 @@ test("P2 contract: concept readiness exposes at most ten safe current failed/con
       const evidence = insertEvidence(database, failureSource, suffix);
       const status = index % 2 === 0 ? "failed" : "conflict";
       const attemptedAt = `2026-08-03T${String(index).padStart(2, "0")}:00:00.000Z`;
-      await failBackfill(evidence, attemptedAt, { secret: `READINESS_SECRET_${index}` });
+      const state = await failBackfill(evidence, attemptedAt, { secret: `READINESS_SECRET_${index}` });
       if (status === "conflict") {
         database.prepare("UPDATE concept_backfill SET status = 'conflict' WHERE article_url = ?").run(evidence.url);
         database.prepare("UPDATE concept_backfill_attempts SET status = 'conflict' WHERE article_url = ?").run(evidence.url);
       }
-      expectedNewestFirst.unshift({ articleUrl: evidence.url, status, attemptedAt });
+      expectedNewestFirst.unshift({ articleUrl: evidence.url, status, attemptedAt: state.attempted_at });
     }
 
     // These rows must not appear: they are no longer the current public
