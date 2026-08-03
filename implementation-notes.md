@@ -804,3 +804,24 @@
 - Server-rendered route contracts: 46/46.
 - ESLint, TypeScript, Next.js production build and `git diff --check`: passed.
 - Production acceptance requires deploying this revision, rerunning `concepts:backfill` until no worker remains, and confirming `pendingArticleCount=0`, `failedArticleCount=0`, healthy recovery status and readable formal/candidate dossiers.
+
+## 2026-08-04 · Formal official-only implementation delta repair
+
+### Production evidence and reproduced root cause
+
+- After the first tail-backlog repair, production processed 2/12 articles and rejected 10/12 as `evidence-contract`. A production-shaped local fixture reproduced the exact internal reason: `NO_PRACTITIONER_IMPLEMENTATION_EVIDENCE`.
+- The failing materials add official/vendor implementation details to existing formal concepts. A changed `implementationPatterns` value correctly cannot inherit an old practitioner's citation, but the writer incorrectly treated the resulting official-only delta as a fatal regression instead of an auditable pending cross-validation.
+
+### Correctness decisions and edge cases
+
+- The current formal projection now retains the previous practitioner-backed `implementationPatterns` field and citation when a new wording has only official evidence. New official evidence and source-bound claims remain in the current evidence set; the unverified new field wording remains in the append-only revision audit.
+- The audit writer previously overlaid the entire public last-good concept onto the audit concept twice, silently erasing the official/watch knowledge delta. It now overlays only stable identity and lifecycle metadata and persists the actual analyzed knowledge fields in `concept_revisions`.
+- The formal publication requirement for practitioner implementation evidence remains unchanged. No evidence URL, claim binding, Chinese editorial, identity, lifecycle or snapshot gate was weakened.
+
+### Final five-line summary
+
+- Deviations: 1; a broad `evidence-contract` diagnosis was replaced by a production-shaped exact-code reproduction before changing the writer.
+- Most likely revisit: official-only implementation deltas remain non-public until practitioner evidence validates the new wording.
+- Edge cases found: a valid official delta could fail a formal dossier, and the audit payload could then erase that same delta.
+- Verification: concept/revision/publication suite 99/99; full unit/integration suite 285/285; ESLint, TypeScript and production build passed.
+- Next session: read this section, `preserveFormalLastGoodFields`, the audit branch in `applyConceptKnowledgeRevision`, and the production backfill output before changing formal evidence rules.

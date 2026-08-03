@@ -958,7 +958,24 @@ export function applyConceptKnowledgeRevision(database, rawPayload, {
   if (effectiveRevisionAuditPayload) {
     const auditInput = normalizedStoredPayload(structuredClone(effectiveRevisionAuditPayload));
     if (!auditInput) throw new Error("概念修订审计载荷无效");
-    auditInput.concept = { ...conceptDomainFields(auditInput.concept), ...payload.concept };
+    const auditConcept = conceptDomainFields(auditInput.concept);
+    auditInput.concept = {
+      ...auditConcept,
+      // The current public projection owns lifecycle and stable identity
+      // metadata. Knowledge fields must remain the analyzed audit version;
+      // spreading the whole public concept here erased precisely the
+      // official/watch delta that the append-only revision was meant to keep.
+      slug: payload.concept.slug,
+      canonicalName: payload.concept.canonicalName,
+      name: payload.concept.canonicalName,
+      stage: payload.concept.stage,
+      heat: payload.concept.heat,
+      temperature: payload.concept.temperature,
+      maturity: payload.concept.maturity,
+      independentSourceGroups: payload.concept.independentSourceGroups,
+      createdAt: payload.concept.createdAt,
+      revision: payload.concept.revision,
+    };
     const auditEvidence = articleRowsForEvidence(database, auditInput.evidence);
     const auditEvidenceByClaim = new Map(auditInput.claims.map((claim) => [claim.key, []]));
     for (const evidence of auditEvidence) {
@@ -974,7 +991,7 @@ export function applyConceptKnowledgeRevision(database, rawPayload, {
     }));
     revisionPayload = {
       ...(auditInput.identityDecision ? { identityDecision: structuredClone(auditInput.identityDecision) } : {}),
-      concept: { ...payload.concept },
+      concept: { ...auditInput.concept },
       claims: auditClaims,
       evidence: auditEvidence,
       citations: auditInput.citations.map((citation) => ({
@@ -1506,6 +1523,7 @@ function projectMergedPayloadToPublishCurrent(database, payload) {
 function preserveFormalLastGoodFields(projected, previous) {
   if (!previous?.concept) return projected;
   const publishUrls = new Set((projected.evidence || []).map((item) => item.url));
+  const publishedEvidenceByUrl = new Map((projected.evidence || []).map((item) => [item.url, item]));
   const citationByField = new Map((projected.citations || []).map((item) => [item.field, {
     ...item,
     evidenceUrls: unique((item.evidenceUrls || []).filter((url) => publishUrls.has(url))),
@@ -1522,6 +1540,30 @@ function preserveFormalLastGoodFields(projected, previous) {
     if (evidenceUrls.length === 0) continue;
     concept[field] = structuredClone(previousValue);
     citationByField.set(field, { field, evidenceUrls });
+  }
+
+  // A changed implementation pattern cannot inherit an old practitioner's
+  // citation because that source only proved the previous wording. However,
+  // an official-only delta must not make an already-formal dossier fail its
+  // public quality gate either. Keep the new official evidence and claims in
+  // the current/audit payload, while the public field stays on its last-good
+  // practitioner-backed value until a practitioner source validates the new
+  // implementation meaning.
+  const implementationCitation = citationByField.get("implementationPatterns");
+  const hasPractitionerImplementationEvidence = (implementationCitation?.evidenceUrls || [])
+    .some((url) => publishedEvidenceByUrl.get(url)?.sourceLayer === "practitioner");
+  if (!hasPractitionerImplementationEvidence) {
+    const previousValue = previous.concept.implementationPatterns;
+    const evidenceUrls = unique((previousCitationByField.get("implementationPatterns")?.evidenceUrls || [])
+      .filter((url) => publishUrls.has(url))
+      .filter((url) => publishedEvidenceByUrl.get(url)?.sourceLayer === "practitioner"));
+    if (nonEmptyKnowledgeField(previousValue) && evidenceUrls.length > 0) {
+      concept.implementationPatterns = structuredClone(previousValue);
+      citationByField.set("implementationPatterns", {
+        field: "implementationPatterns",
+        evidenceUrls,
+      });
+    }
   }
   return {
     ...projected,

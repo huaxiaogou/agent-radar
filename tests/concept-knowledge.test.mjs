@@ -1541,6 +1541,126 @@ test("watch evidence completes backfill while preserving the formal concept last
   }
 });
 
+test("official implementation evidence cannot erase a formal concept's practitioner-backed last-good field", async () => {
+  const {
+    applyConceptKnowledgeRevision,
+    getConceptKnowledge,
+    runConceptKnowledgeBackfill,
+  } = await knowledgeApi(
+    "applyConceptKnowledgeRevision",
+    "getConceptKnowledge",
+    "runConceptKnowledgeBackfill",
+  );
+  const database = await createDatabase();
+  try {
+    upsertSourceCatalog(database, [SOURCES.vendorBlog, SOURCES.practitioner, SOURCES.vendorRepo]);
+    const officialUrl = insertEvidenceArticle(database, SOURCES.vendorBlog, {
+      suffix: "formal-implementation-official",
+      originalTitle: "Formal runtime assurance contract",
+    });
+    const practitionerUrl = insertEvidenceArticle(database, SOURCES.practitioner, {
+      suffix: "formal-implementation-practice",
+      originalTitle: "生产运行时保障实践",
+    });
+    const basePayload = fullKnowledgePayload({
+      evidence: [
+        evidenceFor(SOURCES.vendorBlog, officialUrl, "Formal runtime assurance contract"),
+        evidenceFor(SOURCES.practitioner, practitionerUrl, "生产运行时保障实践"),
+      ],
+      dailyDelta: "正式知识已经由官方定义与独立实践共同支撑。",
+    });
+    applyConceptKnowledgeRevision(database, basePayload, applyOptions());
+    const before = getConceptKnowledge(database, "runtime-assurance-loop").concept;
+    assert.notEqual(before.stage, "candidate");
+
+    const newOfficialUrl = insertEvidenceArticle(database, SOURCES.vendorRepo, {
+      suffix: "formal-implementation-new-official",
+      originalTitle: "New official harness implementation",
+    });
+    const newClaimKey = "official-harness-session-boundary";
+    const incoming = fullKnowledgePayload({
+      evidence: [
+        evidenceFor(SOURCES.vendorBlog, officialUrl, "Formal runtime assurance contract"),
+        evidenceFor(SOURCES.practitioner, practitionerUrl, "生产运行时保障实践"),
+        evidenceFor(SOURCES.vendorRepo, newOfficialUrl, "New official harness implementation", {
+          supports: [newClaimKey],
+        }),
+      ],
+      dailyDelta: "新的官方实现把会话日志与执行沙箱拆成可独立恢复的接口。",
+    });
+    incoming.identityDecision = {
+      action: "reuse-existing",
+      canonicalSlug: "runtime-assurance-loop",
+      confidence: 0.94,
+      reason: "新材料补充了既有运行时保障闭环的实现方式，没有形成机制独立的新概念。",
+      comparedSlugs: ["runtime-assurance-loop"],
+    };
+    incoming.concept.implementationPatterns = ["把会话日志和执行沙箱拆成可独立替换的运行接口"];
+    incoming.claims.push({
+      key: newClaimKey,
+      text: "官方实现通过分离会话日志与执行沙箱，使 Harness 可以在故障后无状态恢复。",
+      kind: "pattern",
+      confidence: 0.9,
+    });
+    incoming.citations = incoming.citations.map((citation) => (
+      ["implementationPatterns", "dailyDelta"].includes(citation.field)
+        ? { field: citation.field, evidenceUrls: [newOfficialUrl] }
+        : citation
+    ));
+    Object.defineProperty(incoming, "analysisMetadata", {
+      value: {
+        provider: "deepseek",
+        model: "deepseek-compact-test",
+        extractionDelta: {
+          compact: true,
+          evidenceUrl: newOfficialUrl,
+          patchedFields: ["implementationPatterns", "dailyDelta"],
+          claimKeys: [newClaimKey],
+        },
+      },
+      enumerable: false,
+    });
+
+    const result = await runConceptKnowledgeBackfill({
+      database,
+      articleUrls: [newOfficialUrl],
+      batchSize: 1,
+      concurrency: 1,
+      analyzeArticle: async () => incoming,
+    });
+    const internalFailure = database.prepare(
+      "SELECT last_error FROM concept_backfill WHERE article_url = ?",
+    ).get(newOfficialUrl)?.last_error;
+    assert.equal(
+      result.failedCount,
+      0,
+      `新的官方证据不应让已有正式概念退回 evidence-contract：${internalFailure || JSON.stringify(result.failures)}`,
+    );
+    assert.equal(result.processedCount, 1);
+    const after = getConceptKnowledge(database, "runtime-assurance-loop").concept;
+    assert.deepEqual(
+      after.implementationPatterns,
+      before.implementationPatterns,
+      "只有官方引用的新实现模式必须留在审计层，正式页面继续使用实践证据支撑的 last-good 字段",
+    );
+    assert.ok(after.evidence.some((item) => item.url === newOfficialUrl), "合格的新官方证据仍应进入当前证据集合");
+    const auditPayload = JSON.parse(database.prepare(`
+      SELECT payload_json
+      FROM concept_revisions
+      WHERE concept_slug = 'runtime-assurance-loop'
+      ORDER BY revision DESC
+      LIMIT 1
+    `).get().payload_json);
+    assert.deepEqual(
+      auditPayload.concept.implementationPatterns,
+      ["把会话日志和执行沙箱拆成可独立替换的运行接口"],
+      "最新修订审计必须保留尚未获得实践者交叉验证的新官方实现模式",
+    );
+  } finally {
+    database.close();
+  }
+});
+
 test("historical backfill uses article content CAS and retries a stale analysis without marking it complete", async () => {
   const { runConceptKnowledgeBackfill } = await knowledgeApi("runConceptKnowledgeBackfill");
   const database = await createDatabase();
